@@ -9,10 +9,10 @@ Build Roadmap. This repository follows the TRD layout and the roadmap step order
 
 ## Status
 
-Step **0.1 (project skeleton)** only. There is no application logic, API, database
-schema, UI or Docker Compose yet, so nothing is runnable beyond installing
-dependencies. Next step in the roadmap is 0.2 (Docker Compose with `postgres`, `redis`,
-`api` and `GET /health`).
+Steps **0.1 (project skeleton)** and **0.2 (Compose and health check)**. Docker Compose
+runs `postgres` (pgvector, with the `vector` and `pg_trgm` extensions), `redis` and the
+FastAPI `api`, which exposes `GET /health`. There is no database schema, audit pipeline or
+UI yet. Next step in the roadmap is 0.3 (benchmark fixture repositories).
 
 ## Layout
 
@@ -41,8 +41,8 @@ dependencies. Next step in the roadmap is 0.2 (Docker Compose with `postgres`, `
 
 - Python 3.12
 - Node.js 20+ (frontend, from a later step)
-- Docker (from step 0.2)
-- PostgreSQL 16 with `pgvector` and `pg_trgm`, and Redis (from step 0.2)
+- Docker with Compose
+- PostgreSQL 16 with `pgvector` and `pg_trgm`, and Redis (both provided by Compose)
 
 ## Setup
 
@@ -59,7 +59,26 @@ backend/.venv/Scripts/pip install -e "backend[dev]"   # Windows
 ## Run
 
 ```bash
-# API (no routes exist yet; added in step 0.2)
+# Whole stack (api on http://localhost:8000)
+docker compose up --build
+
+# Health check: 200 when Postgres and Redis answer, 503 with per-check detail otherwise
+curl -i http://localhost:8000/health
+```
+
+```json
+{
+  "status": "ok",
+  "checks": {"database": {"status": "ok"}, "redis": {"status": "ok"}}
+}
+```
+
+The extensions are created only on the first start of an empty volume. To re-run that
+init script, remove the volume with `docker compose down -v` (this deletes the database).
+
+Running the API outside Docker instead:
+
+```bash
 backend/.venv/Scripts/python -m uvicorn app.main:app --reload --app-dir backend
 ```
 
