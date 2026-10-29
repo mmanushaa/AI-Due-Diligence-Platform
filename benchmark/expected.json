@@ -1,0 +1,173 @@
+{
+  "benchmark_version": "0.3.0",
+  "notes": [
+    "Fixture repositories under benchmark/repos/ are test data. Never execute them.",
+    "Every entry cites a real file and exact line range in this repository.",
+    "detector values follow the step 0.3 vocabulary: secret scanner, dependency scan, license scan, static analysis, agent, architecture."
+  ],
+  "issues": [
+    {
+      "id": "py-secret-01",
+      "repo": "python_app",
+      "category": "secret",
+      "title": "Hardcoded GitHub token in settings module",
+      "file": "app/config.py",
+      "line_start": 16,
+      "line_end": 16,
+      "severity": "high",
+      "detector": "secret scanner",
+      "notes": "Fake token, ghp_ followed by 36 'a' characters; a gitleaks github-pat rule should match."
+    },
+    {
+      "id": "py-dep-01",
+      "repo": "python_app",
+      "category": "dependency",
+      "title": "Jinja2 2.11.2 has a published ReDoS advisory",
+      "file": "requirements.txt",
+      "line_start": 3,
+      "line_end": 3,
+      "severity": "medium",
+      "detector": "dependency scan",
+      "package": "jinja2",
+      "version": "2.11.2",
+      "advisory_id": "GHSA-g3rq-g295-4j3m",
+      "aliases": [
+        "CVE-2020-28493",
+        "PYSEC-2021-66"
+      ],
+      "notes": "Fixed in 2.11.3; OSV severity MODERATE."
+    },
+    {
+      "id": "py-license-01",
+      "repo": "python_app",
+      "category": "license",
+      "title": "GPLv2 dependency in a distributed service",
+      "file": "requirements.txt",
+      "line_start": 4,
+      "line_end": 4,
+      "severity": "medium",
+      "detector": "license scan",
+      "package": "mysqlclient",
+      "version": "2.2.0",
+      "license": "GPL-2.0",
+      "notes": "PyPI metadata: 'GNU General Public License v2 (GPLv2)'; no OSV advisories for 2.2.0."
+    },
+    {
+      "id": "py-authz-01",
+      "repo": "python_app",
+      "category": "security",
+      "title": "Order route has no authentication or ownership check",
+      "file": "app/routes/orders.py",
+      "line_start": 10,
+      "line_end": 16,
+      "severity": "high",
+      "detector": "agent",
+      "notes": "Cross-file: app/auth.py defines get_current_user (used by app/routes/search.py), but this route ignores it and app/database.py get_order filters only by id, so any caller can read any order. Not detectable by a single-file scan."
+    },
+    {
+      "id": "py-cycle-01",
+      "repo": "python_app",
+      "category": "architecture",
+      "title": "Circular import between the orders and billing modules",
+      "file": "app/orders.py",
+      "line_start": 5,
+      "line_end": 5,
+      "severity": "low",
+      "detector": "architecture",
+      "notes": "Cycle: app/orders.py:5 -> app/billing.py:3 -> app/orders.py."
+    },
+    {
+      "id": "py-sqli-01",
+      "repo": "python_app",
+      "category": "security",
+      "title": "SQL query built with string formatting from a query parameter",
+      "file": "app/database.py",
+      "line_start": 38,
+      "line_end": 38,
+      "severity": "high",
+      "detector": "static analysis",
+      "notes": "status reaches search_orders() from app/routes/search.py via the query string, then is interpolated with % into the statement."
+    },
+    {
+      "id": "js-secret-01",
+      "repo": "js_app",
+      "category": "secret",
+      "title": "Hardcoded GitHub token in config module",
+      "file": "src/config.js",
+      "line_start": 7,
+      "line_end": 7,
+      "severity": "high",
+      "detector": "secret scanner",
+      "notes": "Fake token, ghp_ followed by 36 'b' characters; a gitleaks github-pat rule should match."
+    },
+    {
+      "id": "js-dep-01",
+      "repo": "js_app",
+      "category": "dependency",
+      "title": "Lodash 4.17.15 has a published prototype pollution advisory",
+      "file": "package.json",
+      "line_start": 12,
+      "line_end": 12,
+      "severity": "high",
+      "detector": "dependency scan",
+      "package": "lodash",
+      "version": "4.17.15",
+      "advisory_id": "GHSA-p6mc-m468-83gw",
+      "aliases": [
+        "CVE-2020-8203"
+      ],
+      "notes": "Fixed in 4.17.19; OSV severity HIGH."
+    },
+    {
+      "id": "js-license-01",
+      "repo": "js_app",
+      "category": "license",
+      "title": "GPL-2.0-or-later dependency in a distributed service",
+      "file": "package.json",
+      "line_start": 13,
+      "line_end": 13,
+      "severity": "medium",
+      "detector": "license scan",
+      "package": "@ckeditor/ckeditor5-core",
+      "version": "41.4.2",
+      "license": "GPL-2.0-or-later",
+      "notes": "npm registry metadata: GPL-2.0-or-later; no OSV advisories for 41.4.2."
+    },
+    {
+      "id": "js-authz-01",
+      "repo": "js_app",
+      "category": "security",
+      "title": "Admin user route mounted without the auth middleware",
+      "file": "src/routes/admin.js",
+      "line_start": 9,
+      "line_end": 15,
+      "severity": "high",
+      "detector": "agent",
+      "notes": "Cross-file: src/auth/requireAuth.js exists and is applied to the reports router in server.js, but server.js mounts admin at /admin without it, so GET /admin/users/:id is unauthenticated."
+    },
+    {
+      "id": "js-cycle-01",
+      "repo": "js_app",
+      "category": "architecture",
+      "title": "Circular require between the queue and worker modules",
+      "file": "src/lib/queue.js",
+      "line_start": 3,
+      "line_end": 3,
+      "severity": "low",
+      "detector": "architecture",
+      "notes": "Cycle: src/lib/queue.js:3 -> src/lib/worker.js:3 -> src/lib/queue.js."
+    },
+    {
+      "id": "js-sqli-01",
+      "repo": "js_app",
+      "category": "security",
+      "title": "SQL query built by template interpolation of an email parameter",
+      "file": "src/db/index.js",
+      "line_start": 17,
+      "line_end": 17,
+      "severity": "high",
+      "detector": "static analysis",
+      "notes": "req.query.email reaches searchUsersByEmail() from src/routes/users.js, then is interpolated into the statement."
+    }
+  ]
+}

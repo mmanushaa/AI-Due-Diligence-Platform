@@ -1,0 +1,16 @@
+{
+  "name": "js-app-fixture",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Benchmark fixture for the due diligence platform. Never run.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "4.21.2",
+    "lodash": "4.17.15",
+    "@ckeditor/ckeditor5-core": "41.4.2",
+    "sqlite3": "5.1.7"
+  }
+}
