@@ -9,10 +9,12 @@ Build Roadmap. This repository follows the TRD layout and the roadmap step order
 
 ## Status
 
-Steps **0.1 (project skeleton)** and **0.2 (Compose and health check)**. Docker Compose
-runs `postgres` (pgvector, with the `vector` and `pg_trgm` extensions), `redis` and the
-FastAPI `api`, which exposes `GET /health`. There is no database schema, audit pipeline or
-UI yet. Next step in the roadmap is 0.3 (benchmark fixture repositories).
+Steps **0.1 (project skeleton)**, **0.2 (Compose and health check)** and **0.3 (benchmark
+fixtures)**. Docker Compose runs `postgres` (pgvector, with the `vector` and `pg_trgm`
+extensions), `redis` and the FastAPI `api`, which exposes `GET /health`. The full database
+schema from the Backend Schema tab is in place as SQLAlchemy models plus one Alembic
+migration (step 1.1); there is no audit pipeline or UI yet. Next step is 1.2 (upload and
+safe zip extraction).
 
 ## Layout
 
@@ -81,6 +83,22 @@ Running the API outside Docker instead:
 ```bash
 backend/.venv/Scripts/python -m uvicorn app.main:app --reload --app-dir backend
 ```
+
+## Database migrations
+
+Alembic reads `DATABASE_URL` from `.env`; no credential lives in `alembic.ini`.
+
+```bash
+cd backend
+.venv/Scripts/python -m alembic upgrade head      # apply
+.venv/Scripts/python -m alembic downgrade base    # drop everything
+.venv/Scripts/python -m alembic check             # models vs database drift
+.venv/Scripts/python -m alembic revision --autogenerate -m "change"
+```
+
+Migration `0001_initial_schema` creates the 18 enum types, all 21 tables, the
+`vector(1536)` embedding column and the indexes from the Indexes section. Append-only
+triggers are intentionally absent until step 3.5.
 
 ## Tests
 

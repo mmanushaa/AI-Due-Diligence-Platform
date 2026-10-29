@@ -14,5 +14,6 @@ def mask_secrets(text: str) -> str:
         except ValueError:
             password = None
         if password:
-            text = text.replace(password, "***")
+            # Only the userinfo form `:password@`, never a substring of the scheme.
+            text = text.replace(f":{password}@", ":***@")
     return _CREDENTIALS_IN_URL.sub(r"://\1:***@", text)
