@@ -42,5 +42,27 @@ services:
       redis:
         condition: service_healthy
 
+  # Celery worker (step 1.9). Runs the audit pipeline: intake validation, file
+  # filtering and the scanners. Scanner containers are started through the host
+  # daemon, so the repository snapshots must be visible to the daemon at the same
+  # path the worker passes to it; see the README before relying on this service.
+  worker:
+    build:
+      context: ./backend
+      target: worker
+    command: ["celery", "-A", "app.jobs.celery_app", "worker", "--loglevel=INFO", "--concurrency=2", "-Q", "audits"]
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-due_diligence}
+      REDIS_URL: redis://redis:6379/0
+      UPLOAD_DIR: /srv/data/uploads
+    volumes:
+      - ./data:/srv/data
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
 volumes:
   postgres_data:

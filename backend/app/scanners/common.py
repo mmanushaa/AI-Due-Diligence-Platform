@@ -9,6 +9,12 @@ from __future__ import annotations
 
 import hashlib
 import re
+import uuid
+
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from app.db.models import Finding
 
 MAX_SNIPPET_CHARS = 500
 MAX_ERROR_CHARS = 2000
@@ -44,3 +50,17 @@ def finding_fingerprint(
     """hash(category, rule, file, line range) per the Backend Schema dedupe rule."""
     material = "|".join([category, rule_id, file_path, str(line_start), str(line_end)])
     return hashlib.sha256(material.encode("utf-8")).hexdigest()
+
+
+def existing_fingerprints(session: Session, audit_id: uuid.UUID) -> set[str]:
+    """Fingerprints already stored for this audit.
+
+    This is the dedupe gate every adapter checks before inserting, so a second run of
+    the same audit stores nothing new. The unique (audit_id, fingerprint) constraint on
+    `findings` is the second line of defence for concurrent writers.
+    """
+    return set(
+        session.execute(
+            select(Finding.fingerprint).where(Finding.audit_id == audit_id)
+        ).scalars()
+    )

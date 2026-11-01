@@ -1,0 +1,65 @@
+{
+  "version": 1,
+  "notes": [
+    "Policy data, not legal advice: the platform flags and cites a license, counsel decides.",
+    "Families are matched against the lowercased license expression, one token at a time",
+    "(expressions like 'MIT OR GPL-2.0-only' are split on AND / OR / WITH and parentheses).",
+    "Any license that matches neither list is reported as not covered by the policy, with",
+    "verdict insufficient_evidence. Missing data is never treated as compliant."
+  ],
+  "default_severity": "medium",
+  "restrictive": [
+    {
+      "name": "AGPL",
+      "severity": "high",
+      "summary": "Affero GPL: network use counts as distribution, so the source obligation reaches a hosted service.",
+      "patterns": ["\\bagpl", "affero general public license"]
+    },
+    {
+      "name": "SSPL",
+      "severity": "high",
+      "summary": "Server Side Public License: offering the software as a service triggers a source-release obligation for the service stack.",
+      "patterns": ["\\bsspl", "server side public license"]
+    },
+    {
+      "name": "GPL",
+      "severity": "medium",
+      "summary": "Strong copyleft: distributing the product with this component obliges releasing the combined work under the same terms.",
+      "patterns": ["\\bgpl(?![a-z])", "\\bgplv[0-9]", "\\bgnu general public license", "\\bgnu gpl"]
+    }
+  ],
+  "permissive": [
+    {
+      "name": "MIT",
+      "patterns": ["\\bmit\\b", "\\bexpat\\b"]
+    },
+    {
+      "name": "Apache-2.0",
+      "patterns": ["\\bapache(-2(\\.0)?)?\\b", "\\bapache license"]
+    },
+    {
+      "name": "BSD",
+      "patterns": ["\\bbsd\\b", "\\bnew bsd\\b", "\\bsimplified bsd\\b"]
+    },
+    {
+      "name": "ISC",
+      "patterns": ["\\bisc\\b"]
+    },
+    {
+      "name": "0BSD",
+      "patterns": ["\\b0bsd\\b", "\\bzero-clause bsd\\b"]
+    },
+    {
+      "name": "Unlicense",
+      "patterns": ["\\bunlicense\\b", "\\bthe unlicense\\b"]
+    },
+    {
+      "name": "Zlib",
+      "patterns": ["\\bzlib\\b"]
+    },
+    {
+      "name": "Python-2.0",
+      "patterns": ["\\bpython software foundation license\\b", "\\bpsf-2\\.0\\b"]
+    }
+  ]
+}

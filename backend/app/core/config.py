@@ -11,6 +11,13 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg://postgres:postgres@localhost:5432/due_diligence"
     redis_url: str = "redis://localhost:6379/0"
 
+    # Celery (step 1.9). Both default to REDIS_URL when unset.
+    celery_broker_url: str | None = None
+    celery_result_backend: str | None = None
+    # A task still unacked after this many seconds is delivered again. Keep it well
+    # above the longest scanner run so a slow audit is not executed twice.
+    celery_visibility_timeout: int = 3600
+
     # Intake limits (step 1.2). Every limit is enforced while streaming the
     # upload, never after the whole archive is already on disk.
     max_upload_bytes: int = 52_428_800

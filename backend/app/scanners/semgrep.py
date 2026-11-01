@@ -17,7 +17,6 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
 
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.enums import (
@@ -34,6 +33,7 @@ from app.db.models import Audit, Evidence, Finding, ScannerRun
 from app.scanners.common import (
     MAX_ERROR_CHARS,
     MAX_SNIPPET_CHARS,
+    existing_fingerprints,
     finding_fingerprint,
     redact_text,
 )
@@ -339,11 +339,7 @@ def scan_audit(
             error=result.error,
         )
 
-    existing = set(
-        session.execute(
-            select(Finding.fingerprint).where(Finding.audit_id == audit_id)
-        ).scalars()
-    )
+    existing = existing_fingerprints(session, audit_id)
 
     stored = 0
     for item in result.results:

@@ -138,6 +138,7 @@ Each scanner runs in its own image, never in the API container:
 docker build -t due-diligence-gitleaks:8.28.0 docker/gitleaks
 docker build -t due-diligence-semgrep:1.182.1 docker/semgrep
 docker build -t due-diligence-osv:2.7.0 docker/osv
+docker build -t due-diligence-scancode:32.5.0 docker/scancode
 ```
 
 ### Gitleaks (secrets)
@@ -192,11 +193,85 @@ is skipped). That file is never written into the snapshot and nothing is execute
 Findings are deduplicated per audit by category, advisory, file and line, so re-running a
 scan stores nothing new.
 
+### ScanCode (licenses)
+
+The image installs ScanCode Toolkit 32.5.0 and pins `pluggy==1.5.0`: from 1.6 on,
+`plugincode` can no longer find its hook specs and the toolkit aborts at startup. The
+license rules ship inside the wheel, so the scan itself needs no network and runs with
+`--network none` and a read-only snapshot mount.
+
+`app/scanners/scancode.py` collects two things from one report: license detections per
+file (with the cited line range) and the dependency inventory ScanCode parses out of
+`requirements.txt` and `package.json`. The policy lives in
+`app/config/license_policy.json` and lists **restrictive** families (AGPL, SSPL, GPL) with
+a severity and **permissive** ones (MIT, Apache-2.0, BSD, ISC, 0BSD, Unlicense, Zlib,
+Python-2.0). Families are matched token by token, so `MIT OR GPL-2.0-only` is restrictive
+and `Apache-2.0 WITH LLVM-exception` is permissive.
+
+**Where dependency licenses come from.** ScanCode can only see licenses that appear in
+the audited files. A dependency that is merely named in a manifest carries no license
+there, so for each exactly pinned dependency the adapter asks the PyPI or npm registry for
+its declared license. This is the one place in the pipeline that uses the network, and it
+is the deliberate choice for this step: the alternative was to change the fixtures rather
+than read real metadata. It is confined to this adapter — the scan container stays
+isolated — and to two fixed https origins, with the package name and version validated
+against a strict pattern before they are put in a URL, so untrusted manifest content
+cannot steer the request. Set `ScancodeConfig(allow_network=False)` to disable it; every
+dependency then becomes an `insufficient_evidence` finding instead.
+
+Each dependency ends in one of three states, and only the permissive one is silent:
+
+| State | Finding |
+| --- | --- |
+| Restrictive license | category `license`, verdict `issue`, `source_tool` `license-policy:<family>`, evidence on the manifest line |
+| Permissive license in the policy | none |
+| No license data, or truncated scan output, or an unpinned dependency | category `license`, verdict `insufficient_evidence`, status `unresolved` |
+
+Missing data is never treated as compliant: an unreadable file makes the whole inventory
+`insufficient_evidence`, a dependency with no published license gets its own finding, and
+one finding per manifest records dependencies declared with version ranges, because their
+installed version — and therefore their license — is unknown. A license that matches
+neither policy list is also reported as `insufficient_evidence` rather than assumed
+permissive.
+
+## Running the scanners together
+
+`app/scanners/orchestrator.py` runs all four scanners for one audit in parallel, each in
+its own thread, its own database session and its own container:
+
+```python
+from app.scanners.orchestrator import ScannerConfigs, run_scanners
+from app.scanners.gitleaks import GitleaksConfig
+
+result = run_scanners(
+    audit.id,
+    repository.storage_path,
+    configs=ScannerConfigs(gitleaks=GitleaksConfig(timeout_seconds=120)),
+)
+result.all_succeeded  # False if any scanner failed
+[(o.tool.value, o.status.value, o.detected, o.stored, o.error) for o in result.outcomes]
+```
+
+Outcomes always come back in the same order (`gitleaks`, `semgrep`, `osv`, `scancode`). A
+scanner that fails — whether it reports failure itself or raises — is marked `failed` in
+its own `scanner_runs` row with the error, and the other scanners finish normally: their
+findings are committed and their runs stay `succeeded`. If a scanner raises before it has
+opened its run row, the orchestrator creates the failed row itself, so a failure always
+leaves a trace.
+
+Dedupe is by fingerprint, `hash(category, rule or title, file, line range)`, and unique
+per audit: every adapter skips a fingerprint that is already stored, and the database
+also carries a unique `(audit_id, fingerprint)` constraint. Running the same audit twice
+therefore stores nothing the second time.
+
 ## Tests
 
 ```bash
-backend/.venv/Scripts/python -m pytest    # scanner tests need docker and both images above
+backend/.venv/Scripts/python -m pytest    # scanner tests need docker and every image above
 ```
+
+The restrictive-license tests read registry metadata, so they need network; the
+missing-data tests pass either way, since a failed lookup is missing data too.
 
 ## Ground rules
 
