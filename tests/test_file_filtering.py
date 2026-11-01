@@ -131,9 +131,9 @@ def _create_repository_and_audit(session, storage_path: str) -> tuple[Repository
     return repository, audit
 
 
-def test_files_are_stored_with_exclusion_state():
+def test_files_are_stored_with_exclusion_state(tmp_path):
     root = build_tree(
-        Path(".").resolve() / "data" / f"pytest-filter-{uuid.uuid4().hex}",
+        tmp_path / f"pytest-filter-{uuid.uuid4().hex}",
         {
             "src/app.py": b"print('hello')\n",
             "node_modules/pkg/index.js": b"module.exports = 1;\n",

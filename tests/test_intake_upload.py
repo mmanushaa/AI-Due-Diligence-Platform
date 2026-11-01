@@ -66,12 +66,19 @@ def client(tmp_path, monkeypatch):
         yield test_client
 
 
-@pytest.fixture(autouse=True)
-def clean_repositories():
-    yield
+def _purge_pytest_repositories() -> None:
     with get_session_factory()() as session:
         session.execute(delete(Repository).where(Repository.name.like("pytest-%")))
         session.commit()
+
+
+@pytest.fixture(autouse=True)
+def clean_repositories():
+    # Clear before as well as after: a killed scanner run can leave `pytest-` rows
+    # behind, and this module asserts on exact repository counts.
+    _purge_pytest_repositories()
+    yield
+    _purge_pytest_repositories()
 
 
 @pytest.fixture

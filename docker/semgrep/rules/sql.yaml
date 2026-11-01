@@ -1,0 +1,45 @@
+# Local rules bundled alongside the registry rulesets.
+#
+# The registry Python ruleset did not report the fixture's string-formatted SQL
+# (it builds the statement in one line and executes it later), so these rules
+# cover that pattern directly. They are line based and deliberately narrow:
+# a parameterised query ("... WHERE id = %s", (value,)) must not match.
+rules:
+  - id: due-diligence.python.sql-string-formatting
+    languages: [python]
+    severity: ERROR
+    message: >-
+      SQL statement built with string formatting or concatenation. Untrusted
+      input can change the query; use bound parameters instead.
+    metadata:
+      category: security
+      technology: [python]
+      confidence: HIGH
+      cwe: "CWE-89: Improper Neutralization of Special Elements used in an SQL Command"
+    pattern-regex: (?i)\b(?:select|insert|update|delete)\b[^\n]*(?:["']\s*%\s*[A-Za-z_]|["']\s*\+\s*[A-Za-z_]|f["'][^\n]*\{)
+
+  - id: due-diligence.javascript.sql-template-interpolation
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: >-
+      SQL statement built by template interpolation. Untrusted input can change
+      the query; use bound parameters instead.
+    metadata:
+      category: security
+      technology: [javascript, typescript]
+      confidence: HIGH
+      cwe: "CWE-89: Improper Neutralization of Special Elements used in an SQL Command"
+    pattern-regex: (?i)\b(?:select|insert|update|delete)\b[^\n]*\$\{
+
+  - id: due-diligence.javascript.sql-string-concatenation
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: >-
+      SQL statement built by string concatenation. Untrusted input can change
+      the query; use bound parameters instead.
+    metadata:
+      category: security
+      technology: [javascript, typescript]
+      confidence: HIGH
+      cwe: "CWE-89: Improper Neutralization of Special Elements used in an SQL Command"
+    pattern-regex: (?i)\b(?:select|insert|update|delete)\b[^\n]*["']\s*\+\s*[A-Za-z_$]
