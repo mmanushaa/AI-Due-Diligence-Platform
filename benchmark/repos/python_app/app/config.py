@@ -13,7 +13,7 @@ class Settings:
     jwt_algorithm = "HS256"
     jwt_expires_minutes = 60
     # Used by the nightly sync job; needs to move to the environment.
-    github_token = "ghp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    github_token = "ghp_FAKE0a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P"
 
 
 settings = Settings()

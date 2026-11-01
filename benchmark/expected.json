@@ -16,7 +16,7 @@
       "line_end": 16,
       "severity": "high",
       "detector": "secret scanner",
-      "notes": "Fake token, ghp_ followed by 36 'a' characters; a gitleaks github-pat rule should match."
+      "notes": "Fake token ghp_FAKE0a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P: ghp_ plus 36 mixed-case characters, above the gitleaks entropy threshold for the github-pat rule."
     },
     {
       "id": "py-dep-01",
@@ -98,7 +98,7 @@
       "line_end": 7,
       "severity": "high",
       "detector": "secret scanner",
-      "notes": "Fake token, ghp_ followed by 36 'b' characters; a gitleaks github-pat rule should match."
+      "notes": "Fake token ghp_FAKE9z8Y7x6W5v4U3t2S1r0Q9p8O7n6M5l4K: ghp_ plus 36 mixed-case characters, above the gitleaks entropy threshold for the github-pat rule."
     },
     {
       "id": "js-dep-01",
