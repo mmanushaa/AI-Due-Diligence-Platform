@@ -14,7 +14,8 @@ dependencies = [
     "alembic>=1.13",
     "psycopg[binary]>=3.2",
     "pgvector>=0.3",
-    "pydantic-settings>=2.4",
+    "pgvector
+pydantic-settings>=2.4",
     "python-multipart>=0.0.20",
     "redis>=5.0",
     "celery[redis]>=5.4",
