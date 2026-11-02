@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -27,6 +28,21 @@ class Settings(BaseSettings):
     # Files above this size are recorded as excluded (step 1.3).
     max_file_bytes: int = 1_048_576
     upload_dir: Path = Path("./data/uploads")
+
+    # Embeddings (step 2.3). `embedding_provider` is "hashing" (offline,
+    # deterministic, no key needed) or "gateway" (the LLM gateway's /embeddings).
+    embedding_provider: str = "hashing"
+    embedding_model: str = "text-embedding-3-small"
+    # Must equal models.EMBEDDING_DIM: the column is vector(1536) and changing it
+    # needs a migration, so a mismatch is refused instead of silently truncated.
+    embedding_dimensions: int = 1_536
+    embedding_batch_size: int = 64
+    embedding_timeout_seconds: float = 30.0
+
+    # LLM gateway (LiteLLM). The key is a SecretStr so it cannot be logged by
+    # accident; nothing prints it.
+    litellm_base_url: str | None = None
+    litellm_api_key: SecretStr | None = None
 
 
 settings = Settings()
