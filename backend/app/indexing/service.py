@@ -14,8 +14,17 @@ from pathlib import Path
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
-from app.db.models import Audit, Chunk, File as FileModel, Repository, Symbol
-from app.indexing.parser import DEFAULT_MAX_CHUNK_TOKENS, parse_file
+from app.db.models import (
+    Audit,
+    CallEdge,
+    Chunk,
+    File as FileModel,
+    ModuleEdge,
+    Repository,
+    Symbol,
+)
+from app.indexing.graph import detect_module_cycles, module_edges, resolve_calls
+from app.indexing.parser import DEFAULT_MAX_CHUNK_TOKENS, ParsedFile, parse_file
 
 
 @dataclass(frozen=True)
@@ -133,4 +142,132 @@ def index_audit(
         symbols=symbol_count,
         chunks=chunk_count,
         errors=tuple(errors),
+    )
+
+
+@dataclass(frozen=True)
+class GraphSummary:
+    module_edges: int
+    call_edges: int
+    resolved_calls: int
+    unresolved_calls: int
+    cycles: tuple[tuple[str, ...], ...] = ()
+
+    def as_dict(self) -> dict:
+        return {
+            "module_edges": self.module_edges,
+            "call_edges": self.call_edges,
+            "resolved_calls": self.resolved_calls,
+            "unresolved_calls": self.unresolved_calls,
+            "cycles": [list(cycle) for cycle in self.cycles],
+        }
+
+
+def _load_parsed(
+    session: Session,
+    audit: Audit,
+    root: Path,
+    files: list[FileModel],
+) -> tuple[list[ParsedFile], dict[str, str]]:
+    parsed_files: list[ParsedFile] = []
+    sources: dict[str, str] = {}
+    for file_row in files:
+        if file_row.is_excluded:
+            continue
+        absolute = root / file_row.path
+        try:
+            source = absolute.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        sources[file_row.path] = source
+        parsed_files.append(
+            parse_file(
+                absolute,
+                language=file_row.language,
+                source=source,
+                display_path=file_row.path,
+            )
+        )
+    return parsed_files, sources
+
+
+def index_graph(
+    session: Session,
+    audit_id: uuid.UUID,
+    *,
+    snapshot_root: Path | None = None,
+) -> GraphSummary:
+    """Fill ``module_edges`` and ``call_edges`` and report circular imports.
+
+    An audit must be indexed first (``index_audit``) so that the symbols these
+    edges point at already exist. Re-running replaces the audit's edges.
+    """
+    audit = session.get(Audit, audit_id)
+    if audit is None:
+        raise ValueError(f"unknown audit {audit_id}")
+    root = snapshot_root or _snapshot_root(session, audit)
+
+    files = list(
+        session.execute(
+            select(FileModel).where(FileModel.audit_id == audit_id).order_by(FileModel.path)
+        ).scalars()
+    )
+    parsed_files, sources = _load_parsed(session, audit, root, files)
+
+    file_ids = {file_row.path: file_row.id for file_row in files}
+    symbol_ids: dict[tuple[str, str], uuid.UUID] = {}
+    for symbol, path in session.execute(
+        select(Symbol, FileModel.path)
+        .join(FileModel, Symbol.file_id == FileModel.id)
+        .where(Symbol.audit_id == audit_id)
+    ):
+        symbol_ids.setdefault((path, symbol.name), symbol.id)
+
+    session.execute(delete(CallEdge).where(CallEdge.audit_id == audit_id))
+    session.execute(delete(ModuleEdge).where(ModuleEdge.audit_id == audit_id))
+    session.flush()
+
+    edge_count = 0
+    for edge in module_edges(parsed_files):
+        from_id = file_ids.get(edge.from_path)
+        to_id = file_ids.get(edge.to_path)
+        if from_id is None or to_id is None:
+            continue
+        session.add(
+            ModuleEdge(
+                audit_id=audit_id,
+                from_file_id=from_id,
+                to_file_id=to_id,
+                kind=edge.kind,
+            )
+        )
+        edge_count += 1
+
+    call_count = 0
+    resolved_count = 0
+    for call in resolve_calls(parsed_files, sources):
+        caller_id = symbol_ids.get((call.caller_path, call.caller_name))
+        if caller_id is None:
+            continue
+        callee_id = symbol_ids.get(call.callee_key) if call.callee_key else None
+        if callee_id is not None:
+            resolved_count += 1
+        session.add(
+            CallEdge(
+                audit_id=audit_id,
+                caller_symbol_id=caller_id,
+                callee_symbol_id=callee_id,
+                callee_name=call.callee_name,
+            )
+        )
+        call_count += 1
+
+    session.commit()
+    cycles = detect_module_cycles(parsed_files)
+    return GraphSummary(
+        module_edges=edge_count,
+        call_edges=call_count,
+        resolved_calls=resolved_count,
+        unresolved_calls=call_count - resolved_count,
+        cycles=tuple(tuple(cycle) for cycle in cycles),
     )
