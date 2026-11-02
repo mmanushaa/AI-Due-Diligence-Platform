@@ -264,6 +264,23 @@ per audit: every adapter skips a fingerprint that is already stored, and the dat
 also carries a unique `(audit_id, fingerprint)` constraint. Running the same audit twice
 therefore stores nothing the second time.
 
+## Stage 1 benchmark gate
+
+`benchmark/run_stage1.py` audits every fixture repository through the API and compares the
+stored findings with `benchmark/expected.json`, matching on category, file and overlapping
+line range. It prints matched issues, missed issues (with the reason each one missed) and
+extra findings that are not in the benchmark, which are for manual review.
+
+It needs the API and a worker running (the audits are executed by Celery):
+
+```bash
+python benchmark/run_stage1.py                     # default API http://127.0.0.1:8000
+python benchmark/run_stage1.py --api http://localhost:8000
+```
+
+The exit status is `1` when an expected issue was not found, `2` when the API is unreachable
+or unhealthy, and `0` otherwise. Extra findings never fail the gate.
+
 ## Tests
 
 ```bash
