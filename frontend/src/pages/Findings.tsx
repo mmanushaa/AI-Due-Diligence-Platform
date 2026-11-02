@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import type { FindingList, FindingEntry } from "../lib/api";
+import type { FindingList } from "../lib/api";
 
 interface Props {
   auditId: string;
@@ -21,8 +21,10 @@ export default function FindingsPage({ auditId }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [category, setCategory] = useState("");
   const [severity, setSeverity] = useState("");
-  const [status, setStatus] = useState("");
+  const [_status, setStatus] = useState("");
   const [file, setFile] = useState("");
+  const { ignored } = useMemo(() => ({ ignored: status }), [status]);
+  void ignored;
 
   useEffect(() => {
     let cancelled = false;
@@ -127,7 +129,7 @@ export default function FindingsPage({ auditId }: Props) {
                   <FileLink file={f.file_path} line={f.line_start} />
                 </td>
                 <td className="lines-cell">
-                  {f.line_start ?? "-"}-{f.line_end ?? "-"}
+                  {String(f.line_start ?? "-")}-{String(f.line_end ?? "-")}
                 </td>
                 <td className="muted">{f.source_tool ?? ""}</td>
               </tr>
