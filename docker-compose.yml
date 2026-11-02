@@ -85,14 +85,20 @@ services:
   frontend:
     image: node:24-slim
     working_dir: /app
+    env_file:
+      - .env
     volumes:
       - .:/app:cached
       - frontend_node_modules:/app/frontend/node_modules
     ports:
       - "5173:5173"
     command: sh -c "cd frontend && if [ ! -d node_modules ]; then npm install; fi && npm run dev -- --host 0.0.0.0 --port 5173"
+    stdin_open: true
+    tty: true
     depends_on:
       - api
+    environment:
+      VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8000}
 
 volumes:
   postgres_data:
