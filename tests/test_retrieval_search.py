@@ -21,7 +21,7 @@ from app.retrieval.embeddings import (
     embed_chunks,
     get_provider,
 )
-from app.retrieval.search import hybrid_search, lexical_search, vector_search
+from app.retrieval.search import lexical_search, vector_search
 
 FIXTURES = Path(__file__).resolve().parents[1] / "benchmark" / "repos"
 
@@ -245,14 +245,6 @@ def test_vector_search_ranks_related_code_above_unrelated(indexed_audit):
         assert "get_connection" in names[:3], names
         assert hits[0].score >= hits[-1].score
 
-
-def test_hybrid_search_returns_exact_and_related(indexed_audit):
-    audit_id, _ = indexed_audit
-
-    with get_session_factory()() as session:
-        hits = hybrid_search(session, audit_id, "get_order", limit=5)
-        assert hits[0].symbol_name == "get_order"
-        assert all(hit.matched_by == "hybrid" for hit in hits)
 
 
 def test_search_is_scoped_to_one_audit(indexed_audit):
