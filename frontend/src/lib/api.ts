@@ -15,7 +15,7 @@ export interface UploadedRepository extends RepositoryOut {
 }
 
 export interface AuditOut {
-  id: number;
+  id: string;
   status: string;
   current_stage: string | null;
   started_at: string | null;

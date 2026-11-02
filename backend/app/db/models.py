@@ -25,7 +25,7 @@ from sqlalchemy import (
     text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR, UUID
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, CreatedAtMixin, IdMixin
 from app.db.enums import (
@@ -258,6 +258,14 @@ class Finding(IdMixin, CreatedAtMixin, Base):
     recommendation: Mapped[str | None] = mapped_column(Text)
     fingerprint: Mapped[str] = mapped_column(Text, nullable=False)  # dedupe key, per audit
 
+    # Evidence is always loaded through its finding; the API shows the earliest
+    # file:line as the finding's location.
+    evidence: Mapped[list["Evidence"]] = relationship(
+        back_populates="finding",
+        cascade="all, delete-orphan",
+        order_by="Evidence.line_start",
+    )
+
 
 class Evidence(IdMixin, CreatedAtMixin, Base):
     __tablename__ = "evidence"
@@ -277,6 +285,8 @@ class Evidence(IdMixin, CreatedAtMixin, Base):
         pg_enum(EvidenceKind, "evidence_kind"), nullable=False
     )
     retrieval_score: Mapped[Decimal | None] = mapped_column(Numeric(10, 4))
+
+    finding: Mapped["Finding"] = relationship(back_populates="evidence")
 
 
 class FindingEvent(IdMixin, CreatedAtMixin, Base):

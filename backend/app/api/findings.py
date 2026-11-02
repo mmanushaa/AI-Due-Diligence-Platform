@@ -3,7 +3,8 @@ import html as _html
 from collections import defaultdict
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import status as http_status
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import and_, desc, select
 from sqlalchemy.orm import Session, selectinload
@@ -34,6 +35,25 @@ SEVERITY_ORDER = (
 )
 
 
+def _primary_evidence(finding: Finding):
+    """The evidence row that locates a finding in the list view.
+
+    Findings carry no file or line of their own; that lives on evidence rows.
+    The earliest file:line is the representative location, ordered so the
+    choice is stable across requests.
+    """
+    rows = list(finding.evidence or [])
+    if not rows:
+        return None
+    rows.sort(key=lambda ev: (ev.file_path, ev.line_start, ev.line_end, str(ev.id)))
+    return rows[0]
+
+
+def _severity_rank(severity: str) -> int:
+    """0 for critical, 4 for info; unknown values sort last."""
+    return SEVERITY_ORDER.index(severity) if severity in SEVERITY_ORDER else len(SEVERITY_ORDER)
+
+
 def _highest_severity(grouped: dict[str, dict[str, list[Finding]]]) -> str:
     for sev in SEVERITY_ORDER:
         if any(sev in grouped[category] for category in grouped):
@@ -57,7 +77,7 @@ def list_findings(
 ):
     audit = session.get(Audit, audit_id)
     if not audit:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="audit not found")
+        raise HTTPException(status_code=http_status.HTTP_404_NOT_FOUND, detail="audit not found")
 
     stmt = (
         select(Finding)
@@ -72,9 +92,11 @@ def list_findings(
     if status:
         stmt = stmt.where(Finding.verification_status == status)
     if file:
-        stmt = stmt.where(Finding.file_path.icontains(file))
+        # The path lives on the evidence rows, so filter through the relationship.
+        stmt = stmt.where(Finding.evidence.any(Evidence.file_path.icontains(file)))
 
     findings = session.execute(stmt).scalars().unique().all()
+    repository = session.get(Repository, audit.repository_id) if audit.repository_id else None
 
     grouped: dict[str, dict[str, list[Finding]]] = defaultdict(lambda: defaultdict(list))
     for finding in findings:
@@ -96,22 +118,22 @@ def list_findings(
             current_stage=audit.current_stage.value if audit.current_stage else None,
             started_at=audit.started_at,
             finished_at=audit.finished_at,
-            error=audit.error,
+            error=getattr(audit, "error", None),
         ),
-        repository=RepositoryOut(
-            id=str(audit.repository_id)
-            if audit.repository_id
-            else "",
-            name="",
-            source_type="",
-            source_ref=None,
-            storage_path="",
-            sha256=None,
-            size_bytes=None,
-            created_at=None,
-        )
-        if False
-        else None,
+        repository=(
+            RepositoryOut(
+                id=str(repository.id),
+                name=repository.name,
+                source_type=repository.source_type,
+                source_ref=repository.source_ref,
+                storage_path=repository.storage_path,
+                sha256=repository.sha256,
+                size_bytes=repository.size_bytes,
+                created_at=repository.created_at,
+            )
+            if repository
+            else None
+        ),
         summary=FindingSummary(
             total=len(findings),
             by_category=by_category,
@@ -125,19 +147,17 @@ def list_findings(
                 category=f.category.value,
                 severity=f.severity.value,
                 status=f.verification_status.value,
-                file_path=f.file_path,
-                line_start=f.line_start,
-                line_end=f.line_end,
-                source_tool=f.source_tool.value if f.source_tool else None,
+                file_path=(_primary_evidence(f).file_path if _primary_evidence(f) else None),
+                line_start=(_primary_evidence(f).line_start if _primary_evidence(f) else None),
+                line_end=(_primary_evidence(f).line_end if _primary_evidence(f) else None),
+                source_tool=f.source_tool,
                 fingerprint=f.fingerprint,
             )
             for f in sorted(
                 findings,
                 key=lambda f: (
-                    -SEVERITY_ORDER.index(f.severity.value)
-                    if f.severity.value in SEVERITY_ORDER
-                    else 0,
-                    f.created_at.isoformat(),
+                    _severity_rank(f.severity.value),
+                    f.created_at.isoformat() if f.created_at else "",
                 ),
             )
         ],
@@ -165,7 +185,7 @@ def get_finding(
     )
     finding = session.execute(stmt).scalars().first()
     if not finding:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="finding not found")
+        raise HTTPException(status_code=http_status.HTTP_404_NOT_FOUND, detail="finding not found")
 
     audit = session.get(Audit, finding.audit_id)
     repository_id = getattr(audit, "repository_id", None)
@@ -173,18 +193,19 @@ def get_finding(
     return FindingDetail(
         id=str(finding.id),
         title=finding.title,
-        description=finding.description,
+        # The schema stores the analyst-facing explanation as `reasoning`.
+        description=finding.reasoning,
         category=finding.category.value,
         severity=finding.severity.value,
         status=finding.verification_status.value,
-        file_path=finding.file_path,
-        line_start=finding.line_start,
-        line_end=finding.line_end,
-        source_tool=finding.source_tool.value if finding.source_tool else None,
+        file_path=(_primary_evidence(finding).file_path if _primary_evidence(finding) else None),
+        line_start=(_primary_evidence(finding).line_start if _primary_evidence(finding) else None),
+        line_end=(_primary_evidence(finding).line_end if _primary_evidence(finding) else None),
+        source_tool=finding.source_tool,
         scanner_tool=getattr(finding, "scanner_tool", None),
         fingerprint=finding.fingerprint,
-        recommendation=getattr(finding, "recommendation", None),
-        verdict=getattr(finding, "verdict", None),
+        recommendation=finding.recommendation,
+        verdict=finding.verdict.value if finding.verdict else None,
         evidence=[
             EvidenceOut(
                 id=str(ev.id),
@@ -193,7 +214,8 @@ def get_finding(
                 line_start=ev.line_start,
                 line_end=ev.line_end,
                 snippet=ev.snippet,
-                label=ev.label,
+                # Evidence rows carry a kind, not a label (see the schema).
+                label=None,
             )
             for ev in (finding.evidence or [])
         ],
@@ -203,7 +225,7 @@ def get_finding(
             current_stage=audit.current_stage.value if audit and audit.current_stage else None,
             started_at=audit.started_at if audit else None,
             finished_at=audit.finished_at if audit else None,
-            error=audit.error if audit else None,
+            error=getattr(audit, "error", None) if audit else None,
         )
         if audit
         else None,
@@ -223,7 +245,7 @@ def audit_report(
 ):
     audit = session.get(Audit, audit_id)
     if not audit:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="audit not found")
+        raise HTTPException(status_code=http_status.HTTP_404_NOT_FOUND, detail="audit not found")
 
     repository = session.get(Repository, audit.repository_id) if audit.repository_id else None
 

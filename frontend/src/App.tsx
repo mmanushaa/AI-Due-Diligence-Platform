@@ -11,8 +11,6 @@ function App() {
   const [repo, setRepo] = useState<UploadedRepository | null>(null);
   const [auditId, setAuditId] = useState<string | null>(null);
 
-  const navigate = (v: View) => setView(v);
-
   return (
     <div className="app">
       <nav className="top-nav">
@@ -20,28 +18,20 @@ function App() {
         <div className="nav-links">
           <button
             className={`nav-btn${view === "upload" ? " active" : ""}`}
-            onClick={() => navigate("upload")}
+            onClick={() => setView("upload")}
           >
             Upload
           </button>
           <button
             className={`nav-btn${view === "status" ? " active" : ""}`}
-            onClick={() => {
-              if (repo && repo.id) {
-                navigate("status");
-                setAuditId(repo.id);
-              }
-            }}
+            onClick={() => repo && setView("status")}
+            disabled={!repo}
           >
             Status
           </button>
           <button
             className={`nav-btn${view === "findings" ? " active" : ""}`}
-            onClick={() => {
-              if (auditId) {
-                navigate("findings");
-              }
-            }}
+            onClick={() => auditId && setView("findings")}
             disabled={!auditId}
           >
             Findings
@@ -52,26 +42,20 @@ function App() {
       <main className="main">
         {view === "upload" && (
           <UploadPage
-            onUploaded={(r) => {
-              setRepo(r);
-              navigate("status");
+            onUploaded={(uploaded) => {
+              setRepo(uploaded);
+              setAuditId(null);
+              setView("status");
             }}
           />
         )}
         {view === "status" && (
           <StatusPage
-            key={repo?.id ?? "no-repo"}
             repositoryId={repo?.id}
-            auditId={auditId}
-            onAuditStarted={(id) => {
-              setAuditId(id);
-              navigate("findings");
-            }}
+            onAuditStarted={(id) => setAuditId(id)}
           />
         )}
-        {view === "findings" && auditId && (
-          <FindingsPage auditId={auditId} />
-        )}
+        {view === "findings" && auditId && <FindingsPage auditId={auditId} />}
       </main>
     </div>
   );

@@ -21,12 +21,8 @@ export default function FindingsPage({ auditId }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [category, setCategory] = useState("");
   const [severity, setSeverity] = useState("");
-  const [_status, setStatus] = useState("");
-  const [file, setFile] = useState("");
-  const { ignored } = useMemo(() => ({ ignored: status }), [status]);
-  void ignored;
-
-  useEffect(() => {
+  const [status, setStatus] = useState("");
+  const [file, setFile] = useState("");  useEffect(() => {
     let cancelled = false;
     const controller = new AbortController();
 
@@ -85,7 +81,6 @@ export default function FindingsPage({ auditId }: Props) {
       <Filters
         category={category}
         severity={severity}
-        status={status}
         file={file}
         categories={categories}
         severities={severities}
@@ -128,8 +123,10 @@ export default function FindingsPage({ auditId }: Props) {
                 <td>
                   <FileLink file={f.file_path} line={f.line_start} />
                 </td>
-                <td className="lines-cell">
-                  {String(f.line_start ?? "-")}-{String(f.line_end ?? "-")}
+                <td>
+                  <span className="lines-cell">
+                    {String(f.line_start ?? "-").toString()}-{String(f.line_end ?? "-").toString()}
+                  </span>
                 </td>
                 <td className="muted">{f.source_tool ?? ""}</td>
               </tr>
@@ -179,7 +176,6 @@ function Empty({ matchFilters }: { matchFilters?: boolean }) {
 function Filters({
   category,
   severity,
-  status,
   file,
   categories,
   severities,
@@ -190,7 +186,6 @@ function Filters({
 }: {
   category: string;
   severity: string;
-  status: string;
   file: string;
   categories: string[];
   severities: string[];
@@ -301,7 +296,7 @@ function Badge({
   );
 }
 
-function FileLink({ file, line }: { file?: string; line?: number }) {
+function FileLink({ file, line }: { file?: string | null; line?: number | null }) {
   if (!file) return <span className="muted" />;
   const href = !line
     ? `#${encodeURIComponent(file)}`

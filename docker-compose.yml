@@ -8,99 +8,76 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - ./docker/initdb:/docker-entrypoint-initdb.d:ro
       - postgres_data:/var/lib/postgresql/data
+      # Enables the vector and pg_trgm extensions on first start only.
+      - ./docker/initdb:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-due_diligence}"]
       interval: 5s
-      retries: 5
+      timeout: 5s
+      retries: 10
 
   redis:
-    image: redis:7-alpine
+    image: redis:7
     ports:
       - "6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
-      retries: 5
+      timeout: 5s
+      retries: 10
 
   api:
     build:
-      context: .
-      dockerfile: docker/api/Dockerfile
-    env_file:
-      - .env
+      context: ./backend
     environment:
-      APP_ENV: development
-      JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
-      MAX_UPLOAD_SIZE_MB: "200"
-      REPO_STORAGE_ROOT: /app/storage/repos
+      # In-network addresses, derived from the same .env values as the postgres service.
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-due_diligence}
       REDIS_URL: redis://redis:6379/0
-      LLM_GATEWAY_BASE_URL: ${LLM_GATEWAY_BASE_URL:-http://llm-gateway:8080}
-      LLM_GATEWAY_API_KEY: ${LLM_GATEWAY_API_KEY:-change-me}
-      LLM_PROVIDER_Model: ${LLM_PROVIDER_Model:-gpt-4o-mini}
-      LLM_PROVIDER_API_KEY: ${LLM_PROVIDER_API_KEY:-change-me}
-      LLM_PROVIDER_BASE_URL: ${LLM_PROVIDER_BASE_URL:-}
     ports:
       - "8000:8000"
-    volumes:
-      - .:/app:cached
-      - repo_storage:/app/storage/repos
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --proxy-headers --reload --log-level info --reload-include '*.py' --reload-include '*.html' --reload-dir /app/backend --reload-dir /app/frontend
 
+  # Celery worker (step 1.9). Runs the audit pipeline: intake validation, file
+  # filtering and the scanners. Scanner containers are started through the host
+  # daemon, so the repository snapshots must be visible to the daemon at the same
+  # path the worker passes to it; see the README before relying on this service.
   worker:
     build:
-      context: .
-      dockerfile: docker/api/Dockerfile
-    env_file:
-      - .env
+      context: ./backend
+      target: worker
+    command: ["celery", "-A", "app.jobs.celery_app", "worker", "--loglevel=INFO", "--concurrency=2", "-Q", "audits"]
     environment:
-      APP_ENV: development
-      JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
-      MAX_UPLOAD_SIZE_MB: "200"
-      REPO_STORAGE_ROOT: /app/storage/repos
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-due_diligence}
       REDIS_URL: redis://redis:6379/0
-      LLM_GATEWAY_BASE_URL: ${LLM_GATEWAY_BASE_URL:-http://llm-gateway:8080}
-      LLM_GATEWAY_API_KEY: ${LLM_GATEWAY_API_KEY:-change-me}
-      LLM_PROVIDER_Model: ${LLM_PROVIDER_Model:-gpt-4o-mini}
-      LLM_PROVIDER_API_KEY: ${LLM_PROVIDER_API_KEY:-change-me}
-      LLM_PROVIDER_BASE_URL: ${LLM_PROVIDER_BASE_URL:-}
+      UPLOAD_DIR: /srv/data/uploads
     volumes:
-      - .:/app:cached
-      - repo_storage:/app/storage/repos
+      - ./data:/srv/data
+      - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
-    command: celery -A app.jobs.celery_app.app worker --loglevel=info --without-gossip --without-mingle -E --pool=solo --max-tasks-per-child 50
 
+  # Minimal UI (step 1.10). Vite dev server for local walkthroughs; it proxies
+  # /api to the api service (see frontend/vite.config.ts).
   frontend:
     image: node:24-slim
-    working_dir: /app
-    env_file:
-      - .env
+    working_dir: /srv/frontend
     volumes:
-      - .:/app:cached
-      - frontend_node_modules:/app/frontend/node_modules
+      - ./frontend:/srv/frontend
+    environment:
+      VITE_API_TARGET: http://api:8000
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
     ports:
       - "5173:5173"
-    command: sh -c "cd frontend && if [ ! -d node_modules ]; then npm install; fi && npm run dev -- --host 0.0.0.0 --port 5173"
-    stdin_open: true
-    tty: true
     depends_on:
       - api
-    environment:
-      VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8000}
 
 volumes:
   postgres_data:
-  repo_storage:
-  frontend_node_modules:

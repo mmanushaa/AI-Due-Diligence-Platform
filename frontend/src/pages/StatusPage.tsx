@@ -1,65 +1,109 @@
-import { useEffect, useState } from "react";
-import { getAudit, type AuditOut } from "../lib/api";
+import { useEffect, useRef, useState } from "react";
+import { getAudit, startAudit, type AuditOut } from "../lib/api";
+
+const POLL_MS = 2000;
 
 export default function StatusPage({
-  auditId,
   repositoryId,
   onAuditStarted,
 }: {
   repositoryId?: string;
-  auditId?: string | null;
   onAuditStarted?: (auditId: string) => void;
 }) {
-  const effectiveId = auditId && typeof auditId === "string" ? auditId : repositoryId ?? null;
-  const [status, setStatus] = useState<AuditOut | null>(null);
+  const [audit, setAudit] = useState<AuditOut | null>(null);
+  const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const timer = useRef<number | null>(null);
+
+  const active = audit !== null && (audit.status === "queued" || audit.status === "running");
 
   useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
+    if (!active || !audit) return;
 
-    const run = async () => {
-      if (!(effectiveId && typeof effectiveId === "string")) {
-        setLoading(false);
-        return;
-      }
+    timer.current = window.setTimeout(async () => {
       try {
-        const data = await getAudit(effectiveId);
-        if (!cancelled) {
-          setStatus(data);
-          if (data.status === "queued" || data.status === "running") {
-            onAuditStarted?.(String(data.id));
-          }
-        }
+        const next = await getAudit(audit.id);
+        setAudit(next);
       } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
-      } finally {
-        if (!cancelled) setLoading(false);
+        setError(err instanceof Error ? err.message : String(err));
       }
-    };
+    }, POLL_MS);
 
-    run();
     return () => {
-      cancelled = true;
+      if (timer.current !== null) window.clearTimeout(timer.current);
     };
-  }, [effectiveId, onAuditStarted]);
+  }, [active, audit]);
+
+  const handleStart = async () => {
+    if (!repositoryId) return;
+    setStarting(true);
+    setError(null);
+    try {
+      const created = await startAudit(repositoryId);
+      setAudit(created);
+      onAuditStarted?.(String(created.id));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setStarting(false);
+    }
+  };
 
   return (
     <div className="page">
       <header className="page-header">
         <h1>Audit status</h1>
+        <p className="muted">
+          Run the scanners against the uploaded snapshot and watch each stage.
+        </p>
       </header>
 
-      {loading && <div className="loading">Loading…</div>}
-      {error && <div className="error">{error}</div>}
-      {status && (
-        <pre className="json">{JSON.stringify(status, null, 2)}</pre>
+      {!repositoryId && <p className="muted">Upload a repository first.</p>}
+
+      {repositoryId && (
+        <div className="field-actions">
+          <button
+            className="btn btn-primary"
+            onClick={handleStart}
+            disabled={starting || active}
+          >
+            {starting ? "Starting…" : active ? "Running…" : "Start audit"}
+          </button>
+        </div>
       )}
 
-      {!effectiveId && (
-        <p className="muted">Upload a repository, then start an audit to see status here.</p>
+      {error && <div className="error">{error}</div>}
+
+      {audit && (
+        <dl className="status-grid">
+          <dt>Audit</dt>
+          <dd>{String(audit.id)}</dd>
+          <dt>Status</dt>
+          <dd>
+            <span className={`status status-${audit.status}`}>{audit.status}</span>
+          </dd>
+          <dt>Stage</dt>
+          <dd>{audit.current_stage ?? "—"}</dd>
+          <dt>Started</dt>
+          <dd>{audit.started_at ?? "—"}</dd>
+          <dt>Finished</dt>
+          <dd>{audit.finished_at ?? "—"}</dd>
+          {audit.error && (
+            <>
+              <dt>Error</dt>
+              <dd className="field-error">{audit.error}</dd>
+            </>
+          )}
+        </dl>
+      )}
+
+      {audit && !active && (
+        <p className="muted">
+          Findings are on the Findings tab ·{" "}
+          <a href={`/api/v1/audits/${audit.id}/report`} target="_blank" rel="noreferrer">
+            open the HTML report
+          </a>
+        </p>
       )}
     </div>
   );
