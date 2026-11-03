@@ -9,14 +9,14 @@ Build Roadmap. This repository follows the TRD layout and the roadmap step order
 
 ## Status
 
-Steps **0.1 (project skeleton)**, **0.2 (Compose and health check)**, **0.3 (benchmark
-fixtures)**, **1.1 (database schema)**, **1.2 (safe zip intake)**, **1.3 (file filtering)**,
-**1.4 (Gitleaks adapter)**, **1.5 (Semgrep adapter)** and **1.6 (OSV-Scanner adapter)**.
-Docker Compose runs `postgres` (pgvector, with the `vector` and `pg_trgm` extensions),
-`redis` and the FastAPI `api`, which exposes `GET /health` and
-`POST /api/v1/repositories`. Secrets are detected and stored masked, static analysis and
-vulnerable dependency findings are stored with code evidence; there are no agents or UI
-yet.
+Steps **0.1** through **2.6** are in place: project skeleton, Compose and health check,
+benchmark fixtures, schema, safe zip intake, file filtering, the four scanner adapters,
+parallel scanner orchestration, indexing and hybrid retrieval, the LiteLLM gateway with a
+per-audit budget, and the evaluation harness. Docker Compose runs `postgres` (pgvector,
+with the `vector` and `pg_trgm` extensions), `redis`, `litellm` and the FastAPI `api`,
+which exposes `GET /health` and `POST /api/v1/repositories`. Findings are stored with
+masked secrets and code evidence; there are no agents or UI yet, so only the
+`scanners_only` benchmark configuration can run.
 
 ## Layout
 
@@ -311,6 +311,50 @@ python benchmark/run_stage1.py --api http://localhost:8000
 
 The exit status is `1` when an expected issue was not found, `2` when the API is unreachable
 or unhealthy, and `0` otherwise. Extra findings never fail the gate.
+
+## Evaluation harness
+
+`benchmark/harness/` runs one configuration over every fixture repository and scores the
+stored findings against `benchmark/expected.json`. It runs the real pipeline in-process
+(`app.jobs.audit.run_audit`), so it needs Postgres and the scanner images, and it never
+needs the API or a worker.
+
+```bash
+backend/.venv/Scripts/python -m benchmark.harness --list                  # what can run here
+backend/.venv/Scripts/python -m benchmark.harness --config scanners_only  # full run, saved
+backend/.venv/Scripts/python -m benchmark.harness --repo clean_app --no-save
+```
+
+The four configurations are `scanners_only`, `single_agent`, `multi_agent` and
+`multi_agent_validated`. A configuration whose agent stage does not exist yet is reported as
+unavailable and exits `2` instead of scoring zero recall for a layer that never ran; the
+agent configurations light up when `app.agents.AGENT_STAGE` exists.
+
+Matching requires the same category, the same file and an overlapping line range, one
+finding per expected issue. `dup` counts findings that repeat an already-matched issue — OSV
+writes one row per advisory, so a dependency with four advisories is four rows for one
+issue — and those are excluded from the precision denominator rather than counted as false
+positives. Raw `found` is still printed next to it.
+
+Evidence accuracy re-reads the cited lines from the snapshot and checks them against the
+claim: the issue's `sink_pattern`, the package and version, or a token shape for secrets
+(whose stored snippets are masked). Severity accuracy compares the reported level with the
+expected one.
+
+Results are stored in `eval_runs` (one row: config, benchmark version, start time, and a
+`metrics` JSONB document with per-repository counts, rates, cost and runtime) and
+`eval_results` (one row per expected issue: `detected`, `evidence_correct`,
+`severity_correct`). Cost and latency stay NULL there because they belong to the repository
+run, not to an individual issue, and copying them onto every row would triple-count.
+
+`benchmark/repos/clean_app` has nothing planted: it is the false-positive control, so every
+finding reported there is a false positive. `benchmark/repos/adversarial_app` plants real
+issues under source comments and a `SECURITY.md` that instruct reviewers to report the code
+as secure, skip files and reveal secrets.
+
+scanners_only, benchmark 0.4.0: recall 12/18, precision 12/12, false-positive rate 0/12,
+evidence 12/12, severity 12/12, cross-file recall 0/6 — the six misses are the four
+access-control issues and the two import cycles, which no scanner can see from one file.
 
 ## Tests
 
