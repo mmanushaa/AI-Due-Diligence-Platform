@@ -1,0 +1,52 @@
+# LiteLLM gateway for local development (step 2.5).
+#
+# The backend never names a provider: it asks this gateway for a model alias and
+# the gateway decides which provider model that alias means. Two aliases are
+# exposed, and the second one is the fallback the gateway itself switches to
+# when the first keeps failing:
+#
+#   gpt-4o-mini  -> ${LITELLM_UPSTREAM_DEFAULT_MODEL}  (triage and everyday calls)
+#   gpt-4o       -> ${LITELLM_UPSTREAM_FALLBACK_MODEL} (cross-file reasoning, fallback)
+#
+# The alias names must match LLM_DEFAULT_MODEL / LLM_TRIAGE_MODEL /
+# LLM_FALLBACK_MODEL in .env, which is what the backend requests. The upstream
+# models come from the environment so no provider name is hard-coded here.
+#
+# No key lives in this file. `api_key` is deliberately left unset: LiteLLM reads
+# the provider's own environment variable (OPENAI_API_KEY, ANTHROPIC_API_KEY, …)
+# from the container environment, which docker compose fills from your .env. That
+# way changing LITELLM_UPSTREAM_* to another provider needs no edit here.
+#
+# The backend also falls back on its own (see app/llm/client.py), so a failure is
+# retried here, then in the client, then against the fallback alias. The two
+# layers are deliberate: the gateway protects every client, the client protects
+# the audit budget and logs what actually happened.
+model_list:
+  - model_name: gpt-4o-mini
+    litellm_params:
+      model: os.environ/LITELLM_UPSTREAM_DEFAULT_MODEL
+
+  - model_name: gpt-4o
+    litellm_params:
+      model: os.environ/LITELLM_UPSTREAM_FALLBACK_MODEL
+
+litellm_settings:
+  # Models disagree on optional parameters; drop what the provider rejects
+  # rather than failing a run over it.
+  drop_params: true
+  num_retries: 2
+  request_timeout: 60
+
+router_settings:
+  routing_strategy: simple-shuffle
+  # Failover is a router setting: after num_retries a request to the default
+  # alias moves to the fallback alias instead of returning an error.
+  fallbacks:
+    - gpt-4o-mini: ["gpt-4o"]
+  allowed_fails: 2
+  cooldown_time: 30
+
+general_settings:
+  # Local development only. Clients must present this as their bearer token,
+  # which is the same value the backend keeps in LITELLM_API_KEY.
+  master_key: os.environ/LITELLM_MASTER_KEY

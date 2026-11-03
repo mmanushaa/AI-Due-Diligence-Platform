@@ -264,6 +264,37 @@ per audit: every adapter skips a fingerprint that is already stored, and the dat
 also carries a unique `(audit_id, fingerprint)` constraint. Running the same audit twice
 therefore stores nothing the second time.
 
+## LLM gateway
+
+The `litellm` Compose service is the only way any code reaches a model
+(`docker/litellm/config.yaml`). The backend never names a provider: it asks for an alias,
+and the gateway maps it to a provider model, retries and falls back to the second alias.
+
+```bash
+docker compose up -d litellm     # gateway on http://localhost:4000
+```
+
+Calls go through `app/llm/client.py`:
+
+```python
+from app.llm import LLMClient
+from app.db.enums import AgentName
+
+client = LLMClient(session, audit.id)
+result = client.complete(AgentName.SECURITY, [{"role": "user", "content": prompt}])
+result.text, result.cost_usd, result.used_fallback
+```
+
+The client checks `audits.budget_usd` before every call and raises `BudgetExceeded` when the
+audit has spent it, so the workflow can stop and keep its partial results. Each attempt
+writes one `agent_runs` row (agent, model, tokens, cost, latency, status); `audits.cost_usd`
+is the sum of those rows. A provider error is retried with exponential backoff, then
+repeated against `LLM_FALLBACK_MODEL`, and only then raises `LLMError`.
+
+No key is read from code: the gateway gets `OPENAI_API_KEY` from the environment, the backend
+holds only `LITELLM_API_KEY` (the gateway's master key) in `Settings.litellm_api_key`, and no
+exception message contains either value.
+
 ## Stage 1 benchmark gate
 
 `benchmark/run_stage1.py` audits every fixture repository through the API and compares the

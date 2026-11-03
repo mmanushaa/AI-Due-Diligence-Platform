@@ -27,6 +27,29 @@ services:
       timeout: 5s
       retries: 10
 
+  # LLM gateway (step 2.5). Every model call goes through here: the backend only
+  # names an alias, and the gateway maps it to a provider model, retries and
+  # falls back (see docker/litellm/config.yaml). The provider key is read from
+  # the environment, never from this file.
+  litellm:
+    image: ghcr.io/berriai/litellm:main-stable
+    command: ["--config", "/etc/litellm/config.yaml", "--port", "4000"]
+    environment:
+      LITELLM_MASTER_KEY: ${LITELLM_API_KEY:-sk-local-dev}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      LITELLM_UPSTREAM_DEFAULT_MODEL: ${LITELLM_UPSTREAM_DEFAULT_MODEL:-openai/gpt-4o-mini}
+      LITELLM_UPSTREAM_FALLBACK_MODEL: ${LITELLM_UPSTREAM_FALLBACK_MODEL:-openai/gpt-4o}
+    volumes:
+      - ./docker/litellm/config.yaml:/etc/litellm/config.yaml:ro
+    ports:
+      - "4000:4000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4000/health/liveliness', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
   api:
     build:
       context: ./backend
@@ -34,6 +57,12 @@ services:
       # In-network addresses, derived from the same .env values as the postgres service.
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-due_diligence}
       REDIS_URL: redis://redis:6379/0
+      # The gateway's in-network address, not the host-side LITELLM_BASE_URL.
+      LITELLM_BASE_URL: http://litellm:4000
+      LITELLM_API_KEY: ${LITELLM_API_KEY:-sk-local-dev}
+      LLM_DEFAULT_MODEL: ${LLM_DEFAULT_MODEL:-gpt-4o-mini}
+      LLM_TRIAGE_MODEL: ${LLM_TRIAGE_MODEL:-gpt-4o-mini}
+      LLM_FALLBACK_MODEL: ${LLM_FALLBACK_MODEL:-gpt-4o}
     ports:
       - "8000:8000"
     depends_on:
@@ -41,6 +70,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      litellm:
+        condition: service_started
 
   # Celery worker (step 1.9). Runs the audit pipeline: intake validation, file
   # filtering and the scanners. Scanner containers are started through the host
@@ -55,6 +86,12 @@ services:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-due_diligence}
       REDIS_URL: redis://redis:6379/0
       UPLOAD_DIR: /srv/data/uploads
+      # Agent calls go through the gateway, as in the api service.
+      LITELLM_BASE_URL: http://litellm:4000
+      LITELLM_API_KEY: ${LITELLM_API_KEY:-sk-local-dev}
+      LLM_DEFAULT_MODEL: ${LLM_DEFAULT_MODEL:-gpt-4o-mini}
+      LLM_TRIAGE_MODEL: ${LLM_TRIAGE_MODEL:-gpt-4o-mini}
+      LLM_FALLBACK_MODEL: ${LLM_FALLBACK_MODEL:-gpt-4o}
     volumes:
       - ./data:/srv/data
       - /var/run/docker.sock:/var/run/docker.sock
@@ -63,6 +100,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      litellm:
+        condition: service_started
 
   # Minimal UI (step 1.10). Vite dev server for local walkthroughs; it proxies
   # /api to the api service (see frontend/vite.config.ts).

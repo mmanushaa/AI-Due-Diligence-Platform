@@ -44,5 +44,29 @@ class Settings(BaseSettings):
     litellm_base_url: str | None = None
     litellm_api_key: SecretStr | None = None
 
+    # Model routing (step 2.5). These are the gateway's aliases, not provider
+    # model ids: docker/litellm/config.yaml maps each alias to a real model, so
+    # changing provider is a gateway change and not a code change. Triage is the
+    # cheap model for first-pass classification; fallback is what a failed call
+    # is retried against before the call is reported as failed.
+    llm_default_model: str = "gpt-4o-mini"
+    llm_triage_model: str = "gpt-4o-mini"
+    llm_fallback_model: str = "gpt-4o"
+    llm_fallback_enabled: bool = True
+    llm_max_output_tokens: int = 1_024
+    llm_temperature: float = 0.0
+    llm_timeout_seconds: float = 60.0
+
+    # Retry policy: attempts per model, then exponential backoff between them.
+    llm_max_attempts: int = 3
+    llm_retry_base_seconds: float = 0.5
+    llm_retry_max_seconds: float = 8.0
+
+    # USD per 1M tokens for a model the price table in app.llm.client does not
+    # know. Override it when routing to a provider with different prices rather
+    # than editing the table.
+    llm_price_input_usd_per_1m: float = 0.15
+    llm_price_output_usd_per_1m: float = 0.60
+
 
 settings = Settings()
