@@ -30,12 +30,21 @@ model_list:
     litellm_params:
       model: os.environ/LITELLM_UPSTREAM_FALLBACK_MODEL
 
+  # Free-tier option: PrismML's 1.58-bit ternary build of Qwen3.6 27B. Kept as its
+  # own alias so trying it means one env change (LLM_DEFAULT_MODEL=bonsai) rather
+  # than repointing the aliases every client already uses. A 27B model this
+  # quantised is weaker at holding a JSON contract, which the baseline already
+  # treats like any other invalid output: one retry, then the finding is dropped.
+  - model_name: bonsai
+    litellm_params:
+      model: os.environ/LITELLM_UPSTREAM_BONSAI_MODEL
+
 litellm_settings:
   # Models disagree on optional parameters; drop what the provider rejects
   # rather than failing a run over it.
   drop_params: true
   num_retries: 2
-  request_timeout: 60
+  request_timeout: 240
 
 router_settings:
   routing_strategy: simple-shuffle

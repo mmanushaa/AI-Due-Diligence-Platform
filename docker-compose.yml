@@ -44,6 +44,7 @@ services:
       TOGETHER_API_KEY: ${TOGETHER_API_KEY:-}
       LITELLM_UPSTREAM_DEFAULT_MODEL: ${LITELLM_UPSTREAM_DEFAULT_MODEL:-openai/gpt-4o-mini}
       LITELLM_UPSTREAM_FALLBACK_MODEL: ${LITELLM_UPSTREAM_FALLBACK_MODEL:-openai/gpt-4o}
+      LITELLM_UPSTREAM_BONSAI_MODEL: ${LITELLM_UPSTREAM_BONSAI_MODEL:-together_ai/Prism-ML/Ternary-Bonsai-27B}
     volumes:
       - ./docker/litellm/config.yaml:/etc/litellm/config.yaml:ro
     ports:

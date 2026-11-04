@@ -72,7 +72,10 @@ REVIEW_QUERIES = (
 )
 MAX_BLOCKS = 24
 MAX_CONTEXT_CHARS = 24_000
-MAX_REPLY_TOKENS = 2_048
+# The JSON answer itself is small, but a reasoning model spends most of its budget
+# before writing it: PrismML's Bonsai used 885 reasoning tokens to answer with nine
+# characters. A budget sized for the answer alone returns no content at all.
+MAX_REPLY_TOKENS = 4_096
 RETRIES = 1
 
 

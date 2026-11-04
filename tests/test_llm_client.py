@@ -25,6 +25,7 @@ from app.db.session import get_session_factory
 from app.llm.client import (
     BudgetExceeded,
     Completion,
+    GatewayChatProvider,
     LLMClient,
     LLMError,
     ProviderError,
@@ -62,6 +63,29 @@ class FakeProvider:
             self.failures[model] = remaining - 1
             raise self.error or ProviderError("gateway call failed: HTTP 503 upstream unavailable")
         return self.completion
+
+
+def test_a_read_timeout_is_a_retryable_provider_error(monkeypatch):
+    """A slow model must fall back, not crash the audit with a socket error.
+
+    A read timeout arrives as a bare TimeoutError once the connection is made, so
+    wrapping only HTTPError/URLError let it escape every layer that catches
+    ProviderError and abort a whole benchmark run.
+    """
+    provider = GatewayChatProvider(
+        base_url="http://gateway.test", api_key="sk-test", timeout_seconds=5
+    )
+
+    def boom(*args, **kwargs):
+        raise TimeoutError("timed out")
+
+    monkeypatch.setattr("urllib.request.urlopen", boom)
+
+    with pytest.raises(ProviderError) as caught:
+        provider.complete(model="m", messages=[], max_tokens=8, temperature=0.0)
+
+    assert caught.value.retryable is True
+    assert "timed out after 5s" in str(caught.value)
 
 
 def settings_for(**overrides) -> Settings:

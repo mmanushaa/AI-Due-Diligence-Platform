@@ -21,6 +21,7 @@ No key appears in this module — the gateway is reached with the key held in
 
 from __future__ import annotations
 
+import http.client
 import json
 import time
 import urllib.error
@@ -60,6 +61,9 @@ MODEL_PRICES: dict[str, tuple[Decimal, Decimal]] = {
     "gpt-4.1": (Decimal("2.00"), Decimal("8.00")),
     "claude-3-5-haiku": (Decimal("0.80"), Decimal("4.00")),
     "claude-sonnet": (Decimal("3.00"), Decimal("15.00")),
+    # Free tier on Together: PrismML's ternary Bonsai. Listed at zero so a run
+    # against it reports what it actually costs instead of the fallback rate.
+    "bonsai": (Decimal("0"), Decimal("0")),
 }
 _PRICE_ALIASES = sorted(MODEL_PRICES, key=len, reverse=True)
 
@@ -229,6 +233,19 @@ class GatewayChatProvider:
             ) from exc
         except urllib.error.URLError as exc:
             raise ProviderError(f"gateway call failed: {exc.reason}", retryable=True) from exc
+        except (TimeoutError, OSError) as exc:
+            # A read timeout arrives as a bare TimeoutError, not a URLError: the
+            # connection was made and the gateway simply took longer than
+            # LLM_TIMEOUT_SECONDS to answer. Slow providers do this, and it must
+            # fall back like any other transient failure instead of killing the
+            # audit with an unhandled socket error.
+            raise ProviderError(
+                f"gateway call timed out after {self.timeout_seconds}s", retryable=True
+            ) from exc
+        except http.client.HTTPException as exc:
+            raise ProviderError(
+                f"gateway call failed: {type(exc).__name__}", retryable=True
+            ) from exc
         except json.JSONDecodeError as exc:
             raise ProviderError("gateway response was not JSON", retryable=False) from exc
 

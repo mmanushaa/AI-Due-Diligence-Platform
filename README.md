@@ -291,9 +291,20 @@ writes one `agent_runs` row (agent, model, tokens, cost, latency, status); `audi
 is the sum of those rows. A provider error is retried with exponential backoff, then
 repeated against `LLM_FALLBACK_MODEL`, and only then raises `LLMError`.
 
-No key is read from code: the gateway gets `OPENAI_API_KEY` from the environment, the backend
-holds only `LITELLM_API_KEY` (the gateway's master key) in `Settings.litellm_api_key`, and no
-exception message contains either value.
+No key is read from code: the gateway gets the provider key (`OPENAI_API_KEY`, or
+`COHERE_API_KEY` / `TOGETHER_API_KEY` when an alias points at those providers) from the
+environment, the backend holds only `LITELLM_API_KEY` (the gateway's master key) in
+`Settings.litellm_api_key`, and no exception message contains either value. Which provider an
+alias means is one variable: set `LITELLM_UPSTREAM_DEFAULT_MODEL=cohere_chat/command-r-plus-08-2024`
+and restart the gateway.
+
+A third alias, `bonsai`, points at PrismML's free 1.58-bit ternary build of Qwen3.6 27B, so
+trying a free model is `LLM_DEFAULT_MODEL=bonsai` rather than repointing the aliases every
+client already uses. It is priced at zero because it costs nothing. It is also a reasoning
+model with no reasoning-length control: the same review prompt that costs command-r-plus one
+short call spent 5,081 reasoning tokens before writing a nine-line JSON answer, and with a
+4,096-token budget it spends all of it thinking and returns no content at all. Give it
+`max_tokens` of at least 8,192 and expect around four minutes per repository.
 
 ## Stage 1 benchmark gate
 
@@ -403,13 +414,14 @@ and says so in its outcome instead of pretending to have reviewed the repository
 `LITELLM_UPSTREAM_*` at a provider whose key is in `.env`, recreate the gateway and re-run
 `--config single_agent`.
 
-single_agent, benchmark 0.4.0 (one call per repository, $0.0027 total): recall 12/18,
-precision 12/14, false-positive rate 2/14, evidence 12/12, severity 12/12, cross-file recall
-0/6. The eight findings it added are six restatements of what the scanners had already
-reported and two false positives, so single-agent retrieval does not yet earn the four
-access-control and two import-cycle misses; that gap is what the multi-agent configurations
-are for. Cost is computed from the rate card of the model alias the backend requested, not
-from whatever provider the gateway mapped it to.
+single_agent, benchmark 0.4.0 (one call per repository, $0.0026 total): recall 12/18,
+precision 12/13, false-positive rate 1/13, evidence 12/12, severity 12/12, cross-file recall
+0/6. The seven findings it added are six restatements of what the scanners had already
+reported and one false positive (a module docstring in config code), so single-agent
+retrieval does not yet earn the four access-control and two import-cycle misses; that gap is
+what the multi-agent configurations are for. Cost is computed from the rate card of the model
+alias the backend requested, not from whatever provider the gateway mapped it to, which is why
+an alias pointing at Cohere's command-r-plus is priced as `gpt-4o-mini`.
 
 ## Tests
 
