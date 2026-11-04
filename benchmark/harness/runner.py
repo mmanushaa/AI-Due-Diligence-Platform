@@ -71,6 +71,7 @@ class RepoEvaluation:
     score: metrics.RepoScore
     outcomes: tuple[IssueOutcome, ...]
     scanner_status: dict[str, str] = field(default_factory=dict)
+    agent_outcome: dict[str, object] | None = None
 
 
 @dataclass(frozen=True)
@@ -97,6 +98,12 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+# A model-driven configuration gets a budget on its throwaway audit, so a
+# misbehaving agent stops the run instead of spending without a ceiling. Scanner
+# configurations never call a model, so they are left unlimited.
+DEFAULT_AGENT_BUDGET_USD = Decimal("0.25")
+
+
 def _fixture_name(configuration: configs.Configuration, repo: str) -> str:
     """A repository name unique per invocation, so repeated runs never collide."""
     return f"eval-{configuration.name}-{repo}-{uuid.uuid4().hex[:8]}"
@@ -119,6 +126,7 @@ def _import_fixture(
         repository_id=repository.id,
         status=AuditStatus.QUEUED,
         config={"eval_config": configuration.name, "fixture_repo": repo},
+        budget_usd=DEFAULT_AGENT_BUDGET_USD if configuration.uses_agent_stage else None,
     )
     session.add(audit)
     session.commit()
@@ -246,11 +254,14 @@ def evaluate_repo(
 
         started = time.monotonic()
         run_audit(audit.id, session_factory=factory)
+        agent_outcome: dict[str, object] | None = None
         if configuration.uses_agent_stage:
-            stage = configs.agent_stage()
+            stage = configs.agent_stages().get(configuration.config)
             if stage is None:  # pragma: no cover - availability() already refused
                 raise configs.ConfigurationUnavailable(f"{configuration.name} needs an agent stage")
-            stage(session, audit.id)
+            produced = stage(session, audit.id)
+            describe = getattr(produced, "as_dict", None)
+            agent_outcome = describe() if callable(describe) else None
         runtime_ms = int((time.monotonic() - started) * 1000)
 
         findings = _load_findings(session, audit.id)
@@ -263,7 +274,10 @@ def evaluate_repo(
             runtime_ms=runtime_ms,
         )
         return RepoEvaluation(
-            score=score, outcomes=outcomes, scanner_status=_scanner_status(session, audit.id)
+            score=score,
+            outcomes=outcomes,
+            scanner_status=_scanner_status(session, audit.id),
+            agent_outcome=agent_outcome,
         )
     finally:
         if repository is not None and not keep_audits:
@@ -337,6 +351,11 @@ def run_configuration(
                 "repos": [evaluation.score.to_json() for evaluation in evaluations],
                 "scanner_status": {
                     evaluation.score.repo: evaluation.scanner_status for evaluation in evaluations
+                },
+                "agents": {
+                    evaluation.score.repo: evaluation.agent_outcome
+                    for evaluation in evaluations
+                    if evaluation.agent_outcome is not None
                 },
             },
         )

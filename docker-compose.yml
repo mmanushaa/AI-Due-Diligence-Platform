@@ -37,6 +37,11 @@ services:
     environment:
       LITELLM_MASTER_KEY: ${LITELLM_API_KEY:-sk-local-dev}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      # The alias to provider-model mapping lives in LITELLM_UPSTREAM_*, so the
+      # matching provider key has to reach the gateway too; otherwise pointing an
+      # alias at Together or Cohere fails with "missing API key".
+      COHERE_API_KEY: ${COHERE_API_KEY:-}
+      TOGETHER_API_KEY: ${TOGETHER_API_KEY:-}
       LITELLM_UPSTREAM_DEFAULT_MODEL: ${LITELLM_UPSTREAM_DEFAULT_MODEL:-openai/gpt-4o-mini}
       LITELLM_UPSTREAM_FALLBACK_MODEL: ${LITELLM_UPSTREAM_FALLBACK_MODEL:-openai/gpt-4o}
     volumes:

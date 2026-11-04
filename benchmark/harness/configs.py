@@ -16,9 +16,10 @@ running it would report zero recall for a layer that never ran, which would read
 as "the agents add nothing" instead of "the agents are not built". Asking for one
 therefore fails with an explicit reason.
 
-The agent stage is plugged in through ``app.agents.AGENT_STAGE``: a callable
-``(session, audit_id) -> None`` that adds findings to an already-scanned audit.
-When that lands, the three agent configurations start working with no change here.
+The agent stage is plugged in through ``app.agents.STAGES``: a mapping from
+configuration to a callable ``(session, audit_id) -> outcome`` that adds findings to
+an already-scanned audit. A configuration becomes runnable the moment its entry
+exists there, so nothing in this module has to change when a stage lands.
 """
 
 from __future__ import annotations
@@ -31,7 +32,7 @@ bootstrap.add_backend_to_path()
 
 from app.db.enums import EvalConfig  # noqa: E402  (after sys.path is set up)
 
-AGENT_STAGE_NAME = "AGENT_STAGE"
+AGENT_REGISTRY = "app.agents.STAGES"
 AGENT_STAGE_MODULE = "app.agents"
 
 
@@ -94,27 +95,27 @@ def get(name: str) -> Configuration:
         ) from exc
 
 
-def agent_stage():
-    """Return ``app.agents.AGENT_STAGE`` when the agent pipeline exists."""
+def agent_stages() -> dict[EvalConfig, object]:
+    """The stage registry, or an empty mapping when the agents package is absent."""
     import importlib
 
     try:
         module = importlib.import_module(AGENT_STAGE_MODULE)
     except ImportError:
-        return None
-    return getattr(module, AGENT_STAGE_NAME, None)
+        return {}
+    return dict(getattr(module, "STAGES", {}) or {})
 
 
 def availability(configuration: Configuration) -> tuple[bool, str | None]:
     """Whether this configuration can run here, and why not when it cannot."""
     if not configuration.uses_agent_stage:
         return True, None
-    if agent_stage() is None:
-        return False, (
-            f"{configuration.name} needs the agent pipeline "
-            f"({AGENT_STAGE_MODULE}.{AGENT_STAGE_NAME}), which this checkout does not have yet"
-        )
-    return True, None
+    if configuration.config in agent_stages():
+        return True, None
+    return False, (
+        f"{configuration.name} needs an agent stage registered in {AGENT_REGISTRY}, "
+        "which this checkout does not have yet"
+    )
 
 
 def runnable() -> tuple[Configuration, ...]:

@@ -326,9 +326,16 @@ backend/.venv/Scripts/python -m benchmark.harness --repo clean_app --no-save
 ```
 
 The four configurations are `scanners_only`, `single_agent`, `multi_agent` and
-`multi_agent_validated`. A configuration whose agent stage does not exist yet is reported as
-unavailable and exits `2` instead of scoring zero recall for a layer that never ran; the
-agent configurations light up when `app.agents.AGENT_STAGE` exists.
+`multi_agent_validated`. A configuration runs when `app.agents.STAGES` has a stage for it;
+otherwise it is reported as unavailable and exits `2` instead of scoring zero recall for a
+layer that never ran. `single_agent` is registered today, so the other two are the ones
+that explain themselves.
+
+Agent configurations get a small `audits.budget_usd` on their throwaway audit, so a
+misbehaving agent stops the run instead of spending without a ceiling. The stage's own
+outcome (model, calls, accepted and rejected findings, cost, errors) is printed under the
+table and stored in `eval_runs.metrics["agents"]`, which is how a run that never reached the
+model is told apart from an agent that found nothing.
 
 Matching requires the same category, the same file and an overlapping line range, one
 finding per expected issue. `dup` counts findings that repeat an already-matched issue — OSV
@@ -355,6 +362,54 @@ as secure, skip files and reveal secrets.
 scanners_only, benchmark 0.4.0: recall 12/18, precision 12/12, false-positive rate 0/12,
 evidence 12/12, severity 12/12, cross-file recall 0/6 — the six misses are the four
 access-control issues and the two import cycles, which no scanner can see from one file.
+
+## The single-agent baseline
+
+`app/agents/baseline_single.py` is one reviewer over the whole repository: it assembles
+context with the read-only tools in `app/agents/tools.py` (`retrieve_context`, `get_symbol`,
+`read_finding`), makes one model call, and stores what survives validation with
+`origin=agent` and `verification_status=ai_suggested`. One call, a fixed retrieval plan and no
+tool loop, so a difference between two runs comes from the model or the code rather than from
+which tools it happened to choose — that is the point of a baseline.
+
+The stage builds the symbol, chunk, call-graph and vector index if the audit does not have
+one yet. `run_audit` indexes files for the scanners and stops there, and retrieval without
+the rest returns nothing, which would look like an agent that found no problems.
+
+`app/agents/prompts.py` keeps the two halves apart. The system message is instructions only and
+never contains repository text; the repository arrives in `build_user_message` and only inside
+`<<<DATA file="…" lines="a-b" untrusted="true">>>` blocks, which the system message says are
+data and never instructions. A block cannot close its own delimiter (the marker is replaced)
+and secrets are masked before rendering, so a token cannot reach the model and an injection
+cannot escape into the instructions.
+
+`app/agents/schema.py` is the contract: `AgentReport`/`AgentFinding` are Pydantic models with
+closed category and severity sets and `extra="forbid"`, so invented keys and invented
+categories are rejected rather than silently stored. The schema cannot check a claim, so
+`validate_report` also requires the file to be in this audit, the line range to fall inside
+the file, and any `evidence_quote` to appear at the cited lines. Invalid output — unparseable,
+schema-invalid or unverifiable — is retried once with the reasons appended, then dropped; a
+partly verifiable reply keeps what can be checked without spending the retry.
+
+```python
+from app.agents import run_baseline_single
+
+outcome = run_baseline_single(session, audit_id)
+outcome.accepted, outcome.rejected, outcome.dropped, outcome.errors
+```
+
+Without a provider key the gateway answers every call with `401`, so the stage stores nothing
+and says so in its outcome instead of pretending to have reviewed the repository. Point
+`LITELLM_UPSTREAM_*` at a provider whose key is in `.env`, recreate the gateway and re-run
+`--config single_agent`.
+
+single_agent, benchmark 0.4.0 (one call per repository, $0.0027 total): recall 12/18,
+precision 12/14, false-positive rate 2/14, evidence 12/12, severity 12/12, cross-file recall
+0/6. The eight findings it added are six restatements of what the scanners had already
+reported and two false positives, so single-agent retrieval does not yet earn the four
+access-control and two import-cycle misses; that gap is what the multi-agent configurations
+are for. Cost is computed from the rate card of the model alias the backend requested, not
+from whatever provider the gateway mapped it to.
 
 ## Tests
 

@@ -148,6 +148,35 @@ def render_scanner_warnings(evaluations) -> str:
     return "\n".join(("Scanner warnings (recall for these tools is not meaningful):", *lines))
 
 
+def render_agent_summary(evaluations) -> str:
+    """One line per repository that ran an agent stage."""
+    lines: list[str] = []
+    for evaluation in evaluations:
+        outcome = evaluation.agent_outcome
+        if not outcome:
+            continue
+        lines.append(
+            f"  {evaluation.score.repo:<20} model={outcome.get('model') or '-'} "
+            f"calls={outcome.get('calls')} accepted={outcome.get('accepted')} "
+            f"rejected={outcome.get('rejected')} cost=${outcome.get('cost_usd')}"
+        )
+    return "\n".join(("Agent stage:", *lines)) if lines else ""
+
+
+def render_agent_warnings(evaluations) -> str:
+    """An agent that could not call the model looks like a miss, so say so."""
+    lines: list[str] = []
+    for evaluation in evaluations:
+        outcome = evaluation.agent_outcome or {}
+        errors = outcome.get("errors") or ()
+        if errors:
+            detail = "; ".join(str(error) for error in errors)[:400]
+            lines.append(f"  ! {evaluation.score.repo}: {detail}")
+    if not lines:
+        return ""
+    return "\n".join(("Agent warnings (recall for the agent layer is not meaningful):", *lines))
+
+
 def render(record) -> str:
     """Everything the harness prints for one run."""
     blocks = [
@@ -161,7 +190,13 @@ def render(record) -> str:
         "",
         render_arithmetic(record.total),
     ]
-    warnings = render_scanner_warnings(record.evaluations)
-    if warnings:
-        blocks.extend(("", warnings))
+    agent_summary = render_agent_summary(record.evaluations)
+    if agent_summary:
+        blocks.extend(("", agent_summary))
+    for warnings in (
+        render_scanner_warnings(record.evaluations),
+        render_agent_warnings(record.evaluations),
+    ):
+        if warnings:
+            blocks.extend(("", warnings))
     return "\n".join(blocks)

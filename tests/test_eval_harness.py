@@ -281,12 +281,14 @@ def test_scanners_only_runs_today_and_agent_configurations_explain_themselves():
     scanners_only = configs.get("scanners_only")
     assert configs.availability(scanners_only) == (True, None)
     assert scanners_only in configs.runnable()
+    # step 2.7 registered the baseline, so this configuration is live now
+    assert configs.availability(configs.get("single_agent")) == (True, None)
 
     for configuration in configs.CONFIGURATIONS:
         available, reason = configs.availability(configuration)
         assert available or reason, f"{configuration.name} must either run or say why not"
         if not available:
-            assert configs.AGENT_STAGE_NAME in (reason or "")
+            assert configs.AGENT_REGISTRY in (reason or "")
 
 
 def test_an_unknown_configuration_is_refused_by_name():
