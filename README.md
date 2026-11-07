@@ -490,6 +490,64 @@ remaining work is making the model prefer the endpoint over the helper, or accep
 as an equivalent location. The two import cycles stay out of reach for this crew, which reads
 code but does not walk a whole import graph.
 
+## The architecture agent
+
+`app/agents/architecture.py` is the second crew in the `multi_agent` configuration,
+registered alongside the security one in `app/agents/multi.py`. Unlike the security
+crew, it does not start from code: it starts from the shape of the repository, which
+the index already knows.
+
+| fact | where it comes from |
+|---|---|
+| module graph | `module_edges` and the parsed import symbols, resolved with step 2.2's `ModuleResolver` |
+| cycles | `find_cycles` (Tarjan), the same detection `index_graph` reports |
+| entry points | modules nothing imports |
+| large modules | line count against the median, with a floor under both |
+| layering | an import from a lower layer (`db`, `store`, `models`) to a higher one (`routes`, `api`, `handlers`) |
+
+The cycle citations are read out of the file, not inferred: the fact is
+`app/billing.py:3 imports app/orders.py -- from app.orders import OrderLine`, and
+that statement is what the finding quotes. The model is asked for the judgement the
+graph cannot make: is this cycle worth a buyer's attention, is this module large or
+just long, does this import really point the wrong way. A guardrail makes it call
+`retrieve_context` before answering, because "too large" and "wrong layer" are
+claims about code, not numbers.
+
+The rule the stage owns is about paths: `validate_architecture_report` accepts only
+architecture findings, and only at files this audit indexed, so a model that
+reasons from memory about "typical" project layouts cannot file a finding against a
+module the repository does not have. Those rejections are counted separately
+(`cited a file this repository does not have`) rather than folded into the general
+drop count, because a stage that invents paths is failing differently from one that
+just got a line range wrong.
+
+The god-module and layering signals are deliberately quiet on these fixtures: the
+largest module in any of them is 55 lines, and no import crosses its layers, so both
+render as `none` and the crew has nothing to say about them. The facts are still
+printed to the prompt and covered by tests, which is the difference between "found
+nothing" and "was never asked".
+
+A proved cycle is also a floor, not only a prompt: when the crew's prose comes back
+unparseable, or it answers without mentioning a cycle the graph found, the stage
+stores the cycle itself from the facts - first import edge, its own statement as the
+quote, `low` severity. The model still writes the finding when it can (it did on
+both fixtures), because the reasoning and the recommendation are the parts worth
+having; the floor exists so the one thing the graph proved cannot be lost to a bad
+reply. The first full run without it lost `js_app`'s cycle to three unparseable
+answers in a row.
+
+multi_agent, benchmark 0.4.0 (two crews per repository, 8 to 11 model calls,
+$0.0158 total, 537s): recall 15/18, precision 15/19, false-positive rate 4/19,
+evidence 15/15, severity 14/15, cross-file recall 3/6. The two cycles behave
+differently and both are worth stating plainly. `js_app` scores 6/6 with the crew
+citing `src/lib/queue.js:3` - the same line the manifest expects. `python_app`'s
+cycle is found and reported, but at `app/billing.py:3`, the reciprocal edge of the
+`app/orders.py:5` the manifest names, so it counts as a miss and its finding as a
+false positive. Both are the same cycle; the manifest picked one side of it, and
+this stage deterministically picks the first edge the walk visits. Severity is
+`medium` from the model against the manifest's `low` for that one cycle, which is the
+single severity miss in the run.
+
 ## Tests
 
 ```bash

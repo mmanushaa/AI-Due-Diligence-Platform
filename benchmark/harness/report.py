@@ -169,7 +169,18 @@ def render_agent_summary(evaluations) -> str:
         if outcome.get("latency_ms"):
             line += f" {int(outcome['latency_ms']) / 1000:.0f}s"
         lines.append(line)
-        for note in outcome.get("notes") or ():
+        for name, agent in (outcome.get("agents") or {}).items():
+            lines.append(
+                f"    - {name}: calls={agent.get('calls')} accepted={agent.get('accepted')} "
+                f"rejected={agent.get('rejected')}"
+                + (f" cycles={agent.get('cycles')}" if agent.get("cycles") is not None else "")
+                + (f" {int(agent['latency_ms']) / 1000:.0f}s" if agent.get("latency_ms") else "")
+            )
+            for note in agent.get("notes") or ():
+                lines.append(f"        . {note}")
+        # A composed stage prints each crew's notes under that crew, so the merged
+        # list is only used when there is nothing to break it down into.
+        for note in () if outcome.get("agents") else (outcome.get("notes") or ()):
             lines.append(f"    . {note}")
     return "\n".join(("Agent stage:", *lines)) if lines else ""
 

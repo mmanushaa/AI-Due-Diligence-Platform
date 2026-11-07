@@ -43,11 +43,12 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from app.agents.baseline_single import MAX_REPLY_TOKENS, AgentOutcome
+from app.agents.baseline_single import AgentOutcome
+from app.agents.crew import GatewayLLM, crew_llm, read_only_tools
 from app.agents.prompts import fill, load_prompt
 from app.agents.schema import AgentFinding, InvalidOutput, parse_report, validate_report
 from app.agents.store import ensure_index, store_findings
-from app.agents.tools import DataBlock, FindingView, RepositoryTools, render_blocks
+from app.agents.tools import FindingView, RepositoryTools
 from app.db.enums import AgentName, Category
 from app.llm.client import LLMClient, LLMError
 
@@ -104,205 +105,12 @@ def _parse_verdicts(raw: str) -> tuple[TriageVerdict, ...]:
     return tuple(verdicts)
 
 
-class GatewayLLM:
-    """The crew's model, forwarded to the audit's budgeted client.
-
-    Written as a plain adapter rather than a CrewAI ``LLM`` subclass: CrewAI only
-    needs an object with ``call`` and ``supports_function_calling``, and duck
-    typing keeps its pydantic internals out of this module's business.
-    """
-
-    def __init__(self, client: LLMClient, *, agent: AgentName = AGENT_ROLE) -> None:
-        self._client = client
-        self._agent = agent
-        self.model = client.settings.llm_default_model
-        self.calls = 0
-
-    def call(
-        self,
-        messages: Any,
-        tools: Any = None,
-        callbacks: Any = None,
-        available_functions: Any = None,
-        from_task: Any = None,
-        from_agent: Any = None,
-        response_model: Any = None,
-    ) -> Any:
-        """One completion, budgeted and logged by :class:`LLMClient`.
-
-        Returns the text of the answer, or the tool calls when the model asked for
-        tools instead of answering. The tool calls go back in the OpenAI shape
-        CrewAI already understands, so its native tool loop can run them.
-        """
-        result = self._client.complete(
-            self._agent,
-            _messages_for_gateway(messages),
-            max_tokens=MAX_REPLY_TOKENS,
-            tools=_gateway_tools(tools),
-        )
-        self.calls += 1
-        if result.tool_calls:
-            return [dict(call) for call in result.tool_calls]
-        return result.text
-
-    def supports_function_calling(self) -> bool:
-        """Native tool calls: the provider's own tool format, not ReAct text."""
-        return True
-
-    def supports_stop_words(self) -> bool:
-        return False
-
-    def get_context_window_size(self) -> int:  # pragma: no cover - CrewAI bookkeeping
-        return 128_000
-
-
-def _crew_llm(llm: GatewayLLM) -> Any:
-    """Wrap the adapter in the ``BaseLLM`` CrewAI validates against.
-
-    CrewAI 1.x only accepts a model name or a ``BaseLLM`` instance for an agent's
-    ``llm``, so the duck-typed adapter is hidden behind a subclass that adds no
-    behaviour of its own: every call still goes through :class:`GatewayLLM` and
-    therefore through the audit's budgeted client. The class is defined here, at
-    call time, so importing :mod:`app.agents` never imports CrewAI.
-    """
-    from crewai.llms.base_llm import BaseLLM
-
-    class GatewayBaseLLM(BaseLLM):
-        """A ``BaseLLM`` whose every completion is the gateway's completion."""
-
-        llm_type: str = "gateway"
-
-        def call(
-            self,
-            messages: Any,
-            tools: Any = None,
-            callbacks: Any = None,
-            available_functions: Any = None,
-            from_task: Any = None,
-            from_agent: Any = None,
-            response_model: Any = None,
-        ) -> Any:
-            """Forward to the adapter, which budgets and logs the call."""
-            return llm.call(messages=messages, tools=tools)
-
-        def supports_function_calling(self) -> bool:
-            """Native tool calls, forwarded to the provider as OpenAI tools."""
-            return True
-
-        def supports_stop_words(self) -> bool:
-            return False
-
-    return GatewayBaseLLM(model=llm.model, context_window_size=llm.get_context_window_size())
-
-
-def _gateway_tools(tools: Any) -> list[dict[str, Any]] | None:
-    """CrewAI's OpenAI tool schemas, minus the keys the provider rejects.
-
-    CrewAI marks every function ``strict: true``. Cohere answers that with a
-    ``422 unknown field`` and the whole crew dies before its first call, so the
-    flag is dropped here rather than sent and refused. The schemas themselves are
-    passed through untouched: they are what the model selects a tool by.
-    """
-    cleaned: list[dict[str, Any]] = []
-    for tool in tools or ():
-        if not isinstance(tool, dict):
-            continue
-        item = dict(tool)
-        function = item.get("function")
-        if isinstance(function, dict) and "strict" in function:
-            item["function"] = {key: value for key, value in function.items() if key != "strict"}
-        cleaned.append(item)
-    return cleaned or None
-
-
-def _messages_for_gateway(messages: Any) -> list[dict[str, Any]]:
-    """CrewAI's messages in the shape the OpenAI-compatible gateway expects.
-
-    Conversation turns that carry tool calls or a tool result must keep those
-    fields: a result without its ``tool_call_id`` is a message the provider cannot
-    match to the call that asked for it.
-    """
-    payload: list[dict[str, Any]] = []
-    for message in messages:
-        content = message.get("content")
-        item: dict[str, Any] = {
-            "role": str(message.get("role", "user")),
-            "content": content
-            if isinstance(content, str)
-            else ("" if content is None else json.dumps(content)),
-        }
-        if message.get("tool_calls"):
-            item["tool_calls"] = list(message["tool_calls"])
-        if message.get("tool_call_id"):
-            item["tool_call_id"] = str(message["tool_call_id"])
-        payload.append(item)
-    return payload
-
-
 def _finding_lines(views: tuple[FindingView, ...]) -> str:
     return "\n".join(
         f"- id={view.finding_id} [{view.category}/{view.severity}] {view.title} "
         f"at {view.file_path}:{view.line_start}-{view.line_end}"
         for view in views
     )
-
-
-def _security_tools(
-    repository_tools: RepositoryTools, calls: list[str] | None = None
-) -> list[Any]:
-    """The only three tools the crew gets, all read-only.
-
-    ``calls`` collects the name of every tool the model actually invoked, which is
-    how the crew tells an investigation apart from an answer written from memory.
-    """
-    from crewai.tools import tool
-
-    record = (calls if calls is not None else []).append
-
-    @tool("retrieve_context")
-    def retrieve_context_tool(query: str) -> str:
-        """Search this audit's code index for code relevant to a question.
-
-        Pass a plain-language question ("where is an order read by id?"), never a
-        file path or a line range: this searches, it does not open a file. Returns
-        delimited, line-numbered blocks of repository text. Read-only.
-        """
-        record("retrieve_context")
-        blocks: tuple[DataBlock, ...] = repository_tools.retrieve_context(query, k=6)
-        logger.debug(
-            "retrieve_context(%r) -> %s",
-            query,
-            [block.file_path for block in blocks] or "nothing",
-        )
-        return render_blocks(blocks) or "no indexed code matched that query"
-
-    @tool("get_symbol")
-    def get_symbol_tool(name: str) -> str:
-        """Return the chunk that declares or references a symbol by name. Read-only."""
-        record("get_symbol")
-        blocks = repository_tools.get_symbol(name)
-        logger.debug("get_symbol(%r) -> %s", name, [block.file_path for block in blocks] or "nothing")
-        return render_blocks(blocks) or f"no symbol named {name!r} was found"
-
-    @tool("read_finding")
-    def read_finding_tool(finding_id: str) -> str:
-        """Read one stored finding and its evidence, by the id in the findings list."""
-        record("read_finding")
-        try:
-            view = repository_tools.read_finding(uuid.UUID(str(finding_id).strip()))
-        except ValueError:
-            return f"{finding_id!r} is not a finding id"
-        if view is None:
-            return f"no finding {finding_id!r} in this audit"
-        logger.debug("read_finding(%s) -> %s", finding_id, view.file_path)
-        return (
-            f"{view.render()}\n"
-            f'<<<DATA file="{view.file_path}" lines="{view.line_start}-{view.line_end}" '
-            f'reason="evidence" untrusted="true">>>\n'
-            f"{view.snippet}\n<<<END_DATA>>>"
-        )
-
-    return [retrieve_context_tool, get_symbol_tool, read_finding_tool]
 
 
 def build_crew(
@@ -319,8 +127,8 @@ def build_crew(
         role=prompt["role"],
         goal=prompt["goal"],
         backstory=prompt["backstory"],
-        tools=_security_tools(repository_tools, calls),
-        llm=_crew_llm(llm),
+        tools=read_only_tools(repository_tools, calls),
+        llm=crew_llm(llm),
         allow_delegation=False,
         max_iter=MAX_ITERATIONS,
         verbose=VERBOSE,
@@ -338,6 +146,14 @@ def build_crew(
         problem, cribbed from the turn it just finished, and the run looks like a
         successful review of code it never opened.
         """
+        raw = getattr(output, "raw", output) or ""
+        try:
+            parse_report(str(raw))
+        except InvalidOutput:
+            return False, (
+                "That is not the JSON object from the contract. Reply with "
+                '{"findings": [...]} and nothing else - no prose, no Markdown list.'
+            )
         if "retrieve_context" not in calls:
             return False, (
                 "You have not searched this repository. Call retrieve_context with a "
@@ -431,7 +247,7 @@ def run_security_agent(
     )[:TRIAGE_LIMIT]
 
     model_client = client or LLMClient(session, audit_id)
-    llm = GatewayLLM(model_client)
+    llm = GatewayLLM(model_client, agent=AGENT_ROLE)
     started = time.monotonic()
 
     try:

@@ -21,13 +21,17 @@ from sqlalchemy import select
 
 from app.agents import STAGES
 from app.agents.prompts import load_prompt
-from app.agents.security import (
-    SOURCE_TOOL,
+from app.agents.crew import (
     GatewayLLM,
-    _gateway_tools,
-    _messages_for_gateway,
+    gateway_tools as _gateway_tools,
+    messages_for_gateway as _messages_for_gateway,
+    read_only_tools as _security_tools,
+)
+from app.agents.multi import run_multi_agent
+from app.agents.security import (
+    AGENT_ROLE,
+    SOURCE_TOOL,
     _parse_verdicts,
-    _security_tools,
     build_crew,
     run_security_agent,
 )
@@ -248,7 +252,7 @@ def findings_of(session, audit_id) -> list[Finding]:
 
 
 def test_the_stage_is_registered_as_the_multi_agent_configuration():
-    assert STAGES[EvalConfig.MULTI_AGENT] is run_security_agent
+    assert STAGES[EvalConfig.MULTI_AGENT] is run_multi_agent
 
 
 def test_the_prompt_has_every_section_the_crew_reads():
@@ -529,7 +533,7 @@ def test_a_tool_call_is_returned_as_a_call_and_the_schemas_are_forwarded():
         "function": {"name": "retrieve_context", "arguments": '{"query": "read_order auth"}'},
     }
     client = ScriptedToolClient(replies=[tool_call, '{"findings": []}'])
-    llm = GatewayLLM(client)
+    llm = GatewayLLM(client, agent=AGENT_ROLE)
 
     answer = llm.call(
         messages=[{"role": "user", "content": "find the authorization gap"}],
@@ -574,7 +578,7 @@ def test_the_investigation_guardrail_refuses_an_answer_written_without_reading(a
     """A crew that answered from memory once answered with the scanner's own finding."""
     session = get_session_factory()()
     tools = RepositoryTools(session, audit)
-    crew = build_crew(tools, GatewayLLM(FakeClient()), ())
+    crew = build_crew(tools, GatewayLLM(FakeClient(), agent=AGENT_ROLE), ())
     triage, investigate = crew.tasks
     try:
         passed, feedback = investigate.guardrail("{}")
@@ -601,7 +605,7 @@ def test_the_investigation_guardrail_refuses_an_answer_written_without_reading(a
 def test_the_crew_is_one_agent_with_two_sequential_tasks(audit):
     session = get_session_factory()()
     tools = RepositoryTools(session, audit)
-    crew = build_crew(tools, GatewayLLM(FakeClient()), ())
+    crew = build_crew(tools, GatewayLLM(FakeClient(), agent=AGENT_ROLE), ())
     try:
         assert len(crew.agents) == 1
         assert [task.description for task in crew.tasks]  # both prompts rendered
