@@ -13,11 +13,21 @@ The split matters more than the wording:
 The JSON contract is repeated in the user message because models follow the
 last reminder best, and the schema is quoted in both places word for word so a
 retry after a rejection is judged against the same rules.
+
+Prompts for the CrewAI agents live next to this module as markdown, one file per
+agent, and are read with :func:`load_prompt`. Markdown is not decoration: the
+person tuning a security reviewer's instructions should be able to diff them as
+prose, and a prompt that is code has a way of growing branches.
 """
 
 from __future__ import annotations
 
+from functools import lru_cache
+from pathlib import Path
+
 from app.agents.tools import DataBlock, FindingView, render_blocks
+
+PROMPT_DIR = Path(__file__).parent
 
 CATEGORY_RULES = """\
 Categories, and what counts as each:
@@ -132,3 +142,52 @@ def build_user_message(
         parts.append(rejection_note)
 
     return "\n\n".join(parts)
+
+
+# --- markdown prompts for the crews ----------------------------------------
+
+
+@lru_cache(maxsize=None)
+def load_prompt(name: str) -> dict[str, str]:
+    """Read ``prompts/<name>.md`` and return its ``## section`` blocks by name.
+
+    Sections are the unit the code needs (a role, a goal, two task descriptions),
+    so the file can stay readable prose while the builder picks the pieces it
+    wants. Text outside any section is a comment and never reaches a model.
+    """
+    path = PROMPT_DIR / f"{name}.md"
+    sections: dict[str, list[str]] = {}
+    current: str | None = None
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if line.startswith("## "):
+            current = line[3:].strip()
+            sections[current] = []
+        elif current is not None:
+            sections[current].append(line)
+    missing = {"role", "goal", "backstory"} - sections.keys()
+    if missing:
+        raise ValueError(f"{path.name} is missing section(s): {', '.join(sorted(missing))}")
+    return {key: "\n".join(value).strip() for key, value in sections.items()}
+
+
+def fill(template: str, **values: str) -> str:
+    """Substitute ``{{name}}`` placeholders.
+
+    Not ``str.format``: the JSON contracts in the prompt are full of braces, and a
+    single unescaped one would raise mid-run.
+    """
+    for key, value in values.items():
+        template = template.replace("{{" + key + "}}", value)
+    return template
+
+
+__all__ = [
+    "CATEGORY_RULES",
+    "JSON_CONTRACT",
+    "PROMPT_DIR",
+    "REVIEW_QUESTIONS",
+    "SYSTEM_PROMPT",
+    "build_user_message",
+    "fill",
+    "load_prompt",
+]

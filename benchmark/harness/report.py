@@ -155,11 +155,22 @@ def render_agent_summary(evaluations) -> str:
         outcome = evaluation.agent_outcome
         if not outcome:
             continue
-        lines.append(
+        line = (
             f"  {evaluation.score.repo:<20} model={outcome.get('model') or '-'} "
             f"calls={outcome.get('calls')} accepted={outcome.get('accepted')} "
             f"rejected={outcome.get('rejected')} cost=${outcome.get('cost_usd')}"
         )
+        if outcome.get("triaged") is not None:
+            line += (
+                f" triaged={outcome.get('triaged')} real={outcome.get('likely_real')}"
+                f" false_positive={outcome.get('likely_false_positive')}"
+                f" uncertain={outcome.get('uncertain')}"
+            )
+        if outcome.get("latency_ms"):
+            line += f" {int(outcome['latency_ms']) / 1000:.0f}s"
+        lines.append(line)
+        for note in outcome.get("notes") or ():
+            lines.append(f"    . {note}")
     return "\n".join(("Agent stage:", *lines)) if lines else ""
 
 

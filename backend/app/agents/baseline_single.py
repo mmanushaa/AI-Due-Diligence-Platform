@@ -28,35 +28,15 @@ import logging
 import uuid
 from dataclasses import dataclass, field
 from decimal import Decimal
-from pathlib import Path
 
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.agents.prompts import SYSTEM_PROMPT, build_user_message
-from app.agents.schema import (
-    AgentFinding,
-    InvalidOutput,
-    describe_errors,
-    parse_report,
-    validate_report,
-)
+from app.agents.schema import InvalidOutput, describe_errors, parse_report, validate_report
+from app.agents.store import ensure_index, store_findings
 from app.agents.tools import DataBlock, RepositoryTools
-from app.indexing.service import index_audit, index_graph
-from app.intake.filtering import index_snapshot
-from app.db.enums import (
-    AgentName,
-    Category,
-    EvidenceKind,
-    FindingOrigin,
-    Severity,
-    Verdict,
-    VerificationStatus,
-)
-from app.db.models import Chunk, Evidence, File, Finding
+from app.db.enums import AgentName
 from app.llm.client import BudgetExceeded, LLMClient, LLMError
-from app.retrieval.embeddings import embed_chunks
-from app.scanners.common import MAX_SNIPPET_CHARS, existing_fingerprints, finding_fingerprint, redact_text
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +71,7 @@ class AgentOutcome:
     dropped: int = 0
     cost_usd: Decimal = Decimal("0")
     blocks: int = 0
+    latency_ms: int = 0
     errors: tuple[str, ...] = field(default_factory=tuple)
 
     @property
@@ -109,33 +90,9 @@ class AgentOutcome:
             "dropped": self.dropped,
             "cost_usd": str(self.cost_usd),
             "blocks": self.blocks,
+            "latency_ms": self.latency_ms,
             "errors": list(self.errors),
         }
-
-
-def _ensure_index(session: Session, audit_id: uuid.UUID, tools: RepositoryTools) -> bool:
-    """Build the symbol/chunk/vector index the retrieval tools need, once.
-
-    The audit pipeline indexes files for the scanners but stops there; symbols,
-    chunks, call edges and vectors are separate stages. Retrieval without them
-    returns nothing at all, which would look like an agent that found no problems.
-    Building them here keeps the stage correct for any audit that has passed
-    intake, and the work is skipped when the index already exists.
-    """
-    already = session.execute(
-        select(Chunk.id).where(Chunk.audit_id == audit_id).limit(1)
-    ).first()
-    if already is not None:
-        return True
-    root = tools.snapshot_root
-    if root is None or not Path(root).is_dir():
-        return False
-
-    index_snapshot(session, audit_id, root)
-    index_audit(session, audit_id, snapshot_root=root)
-    index_graph(session, audit_id, snapshot_root=root)
-    embed_chunks(session, audit_id)
-    return True
 
 
 def _collect_context(tools: RepositoryTools) -> tuple[DataBlock, ...]:
@@ -156,75 +113,6 @@ def _collect_context(tools: RepositoryTools) -> tuple[DataBlock, ...]:
     return tuple(blocks)
 
 
-def _file_ids(session: Session, audit_id: uuid.UUID) -> dict[str, uuid.UUID]:
-    return {
-        path: file_id
-        for file_id, path in session.execute(
-            select(File.id, File.path).where(File.audit_id == audit_id)
-        ).all()
-    }
-
-
-def _store(
-    session: Session,
-    audit_id: uuid.UUID,
-    findings: tuple[AgentFinding, ...],
-    tools: RepositoryTools,
-) -> int:
-    """Insert the accepted findings; returns how many were actually new."""
-    existing = existing_fingerprints(session, audit_id)
-    file_ids = _file_ids(session, audit_id)
-    stored = 0
-    for finding in findings:
-        fingerprint = finding_fingerprint(
-            category=finding.category,
-            rule_id=SOURCE_TOOL,
-            file_path=finding.file,
-            line_start=finding.line_start,
-            line_end=finding.line_end,
-        )
-        if fingerprint in existing:
-            continue
-
-        lines = tools.file_lines(finding.file) or []
-        quote = finding.evidence_quote or "\n".join(
-            lines[finding.line_start - 1 : finding.line_end]
-        )
-        row = Finding(
-            audit_id=audit_id,
-            category=Category(finding.category),
-            title=finding.title,
-            severity=Severity(finding.severity),
-            confidence=Decimal(str(round(finding.confidence, 2))),
-            origin=FindingOrigin.AGENT,
-            source_tool=SOURCE_TOOL,
-            verification_status=VerificationStatus.AI_SUGGESTED,
-            verdict=Verdict.ISSUE,
-            reasoning=finding.reasoning,
-            recommendation=finding.recommendation,
-            fingerprint=fingerprint,
-        )
-        session.add(row)
-        session.flush()
-
-        session.add(
-            Evidence(
-                finding_id=row.id,
-                file_id=file_ids.get(finding.file),
-                file_path=finding.file,
-                line_start=finding.line_start,
-                line_end=finding.line_end,
-                snippet=redact_text(quote)[:MAX_SNIPPET_CHARS],
-                kind=EvidenceKind.PRIMARY,
-            )
-        )
-        existing.add(fingerprint)
-        stored += 1
-
-    session.commit()
-    return stored
-
-
 def run_baseline_single(
     session: Session,
     audit_id: uuid.UUID,
@@ -234,7 +122,7 @@ def run_baseline_single(
 ) -> AgentOutcome:
     """Review one audited repository with a single agent call."""
     repository_tools = tools or RepositoryTools(session, audit_id)
-    if not _ensure_index(session, audit_id, repository_tools):
+    if not ensure_index(session, audit_id, repository_tools):
         logger.info("baseline agent has no readable snapshot for audit %s", audit_id)
         return AgentOutcome(errors=("no readable snapshot to index",))
 
@@ -326,7 +214,9 @@ def run_baseline_single(
         # a hallucination or a schema the model cannot follow, which is exactly what
         # the single retry is for. An empty list is a legitimate "nothing found".
         if validation.accepted or not validation.rejected:
-            stored = _store(session, audit_id, validation.accepted, repository_tools)
+            stored = store_findings(
+            session, audit_id, validation.accepted, repository_tools, source_tool=SOURCE_TOOL
+        )
             logger.info(
                 "baseline agent stored %d finding(s) for audit %s in %d call(s)",
                 stored,

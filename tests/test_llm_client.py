@@ -65,6 +65,49 @@ class FakeProvider:
         return self.completion
 
 
+def test_tool_calls_are_forwarded_and_an_answer_of_only_tool_calls_is_not_empty(make_audit):
+    """A tool-calling reply has no text, and that is a valid completion.
+
+    Without this the crew's native tool loop dies on the first tool call: the
+    provider parses fine but the client rejects the reply as empty.
+    """
+
+    @dataclass
+    class ToolProvider:
+        calls: list[dict] = field(default_factory=list)
+
+        def complete(self, *, model, messages, max_tokens, temperature, tools=None):
+            self.calls.append({"messages": list(messages), "tools": tools})
+            return Completion(
+                text="",
+                input_tokens=900,
+                output_tokens=40,
+                tool_calls=(
+                    {
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {"name": "retrieve_context", "arguments": '{"query": "auth"}'},
+                    },
+                ),
+            )
+
+    audit_id = make_audit()
+    provider = ToolProvider()
+    client = LLMClient(
+        get_session_factory()(), audit_id, provider=provider, settings=settings_for()
+    )
+
+    result = client.complete(
+        AgentName.SECURITY,
+        MESSAGES,
+        tools=[{"type": "function", "function": {"name": "retrieve_context", "parameters": {}}}],
+    )
+
+    assert result.text == ""
+    assert result.tool_calls[0]["function"]["name"] == "retrieve_context"
+    assert provider.calls[0]["tools"][0]["function"]["name"] == "retrieve_context"
+
+
 def test_a_read_timeout_is_a_retryable_provider_error(monkeypatch):
     """A slow model must fall back, not crash the audit with a socket error.
 

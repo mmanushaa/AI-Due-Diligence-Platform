@@ -339,8 +339,8 @@ backend/.venv/Scripts/python -m benchmark.harness --repo clean_app --no-save
 The four configurations are `scanners_only`, `single_agent`, `multi_agent` and
 `multi_agent_validated`. A configuration runs when `app.agents.STAGES` has a stage for it;
 otherwise it is reported as unavailable and exits `2` instead of scoring zero recall for a
-layer that never ran. `single_agent` is registered today, so the other two are the ones
-that explain themselves.
+layer that never ran. `single_agent` and `multi_agent` are registered today, so the other
+two are the ones that explain themselves.
 
 Agent configurations get a small `audits.budget_usd` on their throwaway audit, so a
 misbehaving agent stops the run instead of spending without a ceiling. The stage's own
@@ -423,11 +423,83 @@ what the multi-agent configurations are for. Cost is computed from the rate card
 alias the backend requested, not from whatever provider the gateway mapped it to, which is why
 an alias pointing at Cohere's command-r-plus is priced as `gpt-4o-mini`.
 
+## The security crew (multi-agent)
+
+`app/agents/security.py` is the `multi_agent` configuration: one agent, two tasks, and the same
+three read-only tools. The first task triages every scanner finding in the security and secret
+categories — `likely_real`, `likely_false_positive` or `uncertain`, with reasoning that cites
+what it read — and the second looks for what no single-file scanner can see: a route that
+reads or changes a row without authenticating the caller while a sibling route checks the
+caller, two modules that import each other, or a committed credential.
+
+Triage verdicts are reporting only. The scanner rows are never rewritten, so the harness keeps
+scoring the scanners it scored before, and a verdict stays a claim stored next to the evidence
+rather than a silent edit of it.
+
+The crew reaches the model through `GatewayLLM`, a duck-typed adapter that forwards to
+`LLMClient.complete`, so budget checks, `agent_runs` rows, retries and the fallback model
+behave exactly as they do for the baseline. It needs native function calling
+(`Completion.tool_calls`, `supports_function_calling() -> True`) rather than the ReAct text
+protocol: the gateway here maps `gpt-4o-mini` to Cohere's command-r-plus, which answers a ReAct
+prompt politely and never calls a tool. Two details came out of running it — CrewAI marks every
+tool `strict: true` and Cohere rejects that with a `422` before the first call, and a tool
+result has to keep its `tool_call_id` or the provider cannot match it to the call that asked.
+
+Three things the crew needed before it found anything, each learned from a run that did not:
+
+- the investigation task is not handed the triage transcript, because a model with its own
+triage turn still in context answers the second task by restating what it just triaged;
+- a guardrail rejects an investigation answer written without a single `retrieve_context`
+  call — the first version answered with no tool calls at all and still read like a
+  successful review;
+- the finding is cited at the route, not at the shared query helper. The helper is the proof
+  that the check exists elsewhere; a finding filed against it is one nobody can act on.
+
+The prompts live in `app/agents/prompts/security.md` (`## role`, `## goal`, `## backstory`,
+`## triage`, `## investigation`, `## json_contract`, `## triage_contract`), read by name with
+`load_prompt` and filled with `fill` — which is why `app/agents/prompts.py` became a package.
+Output passes the same `parse_report`/`validate_report` gate as the baseline: a file that is
+not in the audit, a line range past the end of the file, or a quote that does not appear at the
+cited lines is dropped and counted, not stored.
+
+```python
+from app.agents import run_security_agent
+
+outcome = run_security_agent(session, audit_id)
+outcome.triaged, outcome.likely_real, outcome.likely_false_positive, outcome.uncertain
+outcome.accepted, outcome.rejected, outcome.calls, outcome.cost_usd
+```
+
+multi_agent, benchmark 0.4.0 (one crew per repository, five to seven model calls,
+$0.0131 total, 823s): recall 14/18, precision 14/16, false-positive rate 2/16, evidence
+14/14, severity 14/14, cross-file recall 3/6 — against single_agent's 12/18, 12/13, 1/13,
+12/12, 12/12, 0/6 for $0.0026 and 178s. The two issues it adds are access-control gaps no
+scanner can see from one file: the unauthenticated export route in `adversarial_app` and the
+unauthenticated admin route in `js_app`. Everything it reports at the right file is cited
+correctly and scored at the expected severity; the two false positives are one finding on the
+clean repository and one report filed against a shared query helper rather than the route
+that calls it.
+
+That last one is the crew's weak spot, and it is worth stating plainly: on `python_app` the
+planted gap (`py-authz-01`, the order route with no ownership check) is found in some runs and
+missed in others. A repeat over that repository alone scored recall 5/6, precision 1.0,
+cross-file 1.0 in 150s, citing `app/routes/orders.py:11-16`; the full run cited
+`app/database.py:19-30`, the helper the route calls, and a finding filed there matches nothing
+in the manifest. Retrieval is not the cause — the route is in the blocks either way — so the
+remaining work is making the model prefer the endpoint over the helper, or accepting the helper
+as an equivalent location. The two import cycles stay out of reach for this crew, which reads
+code but does not walk a whole import graph.
+
 ## Tests
 
 ```bash
 backend/.venv/Scripts/python -m pytest    # scanner tests need docker and every image above
 ```
+
+The crew tests need neither a key nor the model: `build_crew` is assembled against a scripted
+`GatewayLLM`, so what is checked is the plumbing — three read-only tools, the guardrail that
+refuses an answer written without a search and a symbol lookup, tool schemas losing the
+`strict` flag Cohere rejects, and a tool result keeping its `tool_call_id`.
 
 The restrictive-license tests read registry metadata, so they need network; the
 missing-data tests pass either way, since a failed lookup is missing data too.

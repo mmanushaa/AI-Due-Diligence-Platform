@@ -30,7 +30,7 @@ import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
-from typing import Protocol
+from typing import Any, Protocol
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -111,6 +111,9 @@ class Completion:
     output_tokens: int = 0
     # The gateway's own cost figure (LiteLLM `_hidden_params.response_cost`).
     reported_cost_usd: Decimal | None = None
+    # OpenAI-shaped tool calls, when the caller sent tools. A reply that only
+    # asks for a tool has no text, which is normal and not an empty answer.
+    tool_calls: tuple[dict[str, object], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -125,6 +128,7 @@ class LLMResult:
     latency_ms: int
     attempts: int
     used_fallback: bool = False
+    tool_calls: tuple[dict[str, object], ...] = ()
 
 
 class ChatProvider(Protocol):
@@ -134,9 +138,10 @@ class ChatProvider(Protocol):
         self,
         *,
         model: str,
-        messages: Sequence[Mapping[str, str]],
+        messages: Sequence[Mapping[str, Any]],
         max_tokens: int,
         temperature: float,
+        tools: Sequence[Mapping[str, Any]] | None = None,
     ) -> Completion:
         """Return one completion or raise :class:`ProviderError`."""
 
@@ -200,18 +205,21 @@ class GatewayChatProvider:
         self,
         *,
         model: str,
-        messages: Sequence[Mapping[str, str]],
+        messages: Sequence[Mapping[str, Any]],
         max_tokens: int,
         temperature: float,
+        tools: Sequence[Mapping[str, Any]] | None = None,
     ) -> Completion:
-        payload = json.dumps(
-            {
-                "model": model,
-                "messages": [dict(message) for message in messages],
-                "max_tokens": max_tokens,
-                "temperature": temperature,
-            }
-        ).encode("utf8")
+        body: dict[str, Any] = {
+            "model": model,
+            "messages": [dict(message) for message in messages],
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+        }
+        if tools:
+            body["tools"] = [dict(tool) for tool in tools]
+            body["tool_choice"] = "auto"
+        payload = json.dumps(body).encode("utf8")
         request = urllib.request.Request(
             f"{self.base_url}/chat/completions",
             data=payload,
@@ -257,8 +265,13 @@ class GatewayChatProvider:
             raise ProviderError("gateway response had no choices", retryable=False)
         message = choices[0].get("message") or {}
         text = message.get("content")
+        tool_calls = tuple(
+            call for call in (message.get("tool_calls") or ()) if isinstance(call, dict)
+        )
         if not isinstance(text, str) or not text.strip():
-            raise ProviderError("gateway response had no text", retryable=False)
+            if not tool_calls:
+                raise ProviderError("gateway response had no text", retryable=False)
+            text = ""
         usage = body.get("usage") or {}
         hidden = body.get("_hidden_params") or {}
         reported = hidden.get("response_cost")
@@ -267,6 +280,7 @@ class GatewayChatProvider:
             input_tokens=int(usage.get("prompt_tokens") or 0),
             output_tokens=int(usage.get("completion_tokens") or 0),
             reported_cost_usd=Decimal(str(reported)) if reported is not None else None,
+            tool_calls=tool_calls,
         )
 
 
@@ -346,12 +360,13 @@ class LLMClient:
     def complete(
         self,
         agent: AgentName | str,
-        messages: Sequence[Mapping[str, str]],
+        messages: Sequence[Mapping[str, Any]],
         *,
         task: str = TASK_DEFAULT,
         model: str | None = None,
         max_tokens: int | None = None,
         temperature: float | None = None,
+        tools: Sequence[Mapping[str, Any]] | None = None,
     ) -> LLMResult:
         """Run one completion, logging every attempt and charging the audit.
 
@@ -374,11 +389,16 @@ class LLMClient:
                 attempts += 1
                 started = time.perf_counter()
                 try:
+                    # ``tools`` is only forwarded when it is used, so a provider
+                    # written before tool calling existed still satisfies the
+                    # protocol for every caller that passes no tools.
+                    extra = {"tools": tools} if tools else {}
                     completion = self.provider.complete(
                         model=candidate,
                         messages=messages,
                         max_tokens=max_tokens,
                         temperature=temperature,
+                        **extra,
                     )
                 except ProviderError as exc:
                     latency_ms = int((time.perf_counter() - started) * 1000)
@@ -421,6 +441,7 @@ class LLMClient:
                     latency_ms=latency_ms,
                     attempts=attempts,
                     used_fallback=candidate != candidates[0],
+                    tool_calls=completion.tool_calls,
                 )
 
         raise LLMError(
