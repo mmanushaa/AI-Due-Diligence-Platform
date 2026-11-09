@@ -29,6 +29,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, CreatedAtMixin, IdMixin
 from app.db.enums import (
+    AgentEventType,
     AgentName,
     AssessmentStatus,
     AuditStatus,
@@ -418,6 +419,36 @@ class AgentRun(IdMixin, CreatedAtMixin, Base):
     latency_ms: Mapped[int | None] = mapped_column(Integer)
     status: Mapped[str | None] = mapped_column(Text)
     trace_id: Mapped[str | None] = mapped_column(Text)  # Langfuse
+
+
+class AgentEvent(IdMixin, CreatedAtMixin, Base):
+    """Append-only record of what a crew did, not just what it concluded.
+
+    ``agent_runs`` says a call happened and what it cost; it cannot say which tool
+    the model asked for, what a guardrail refused, or what the model actually wrote
+    when it was refused. Those three are what a failed stage is diagnosed from, so
+    each is a row here. ``payload`` is JSON because the three kinds carry different
+    fields, and every string in it has been through the scanners' secret masker
+    before it was stored.
+    """
+
+    __tablename__ = "agent_events"
+
+    audit_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("audits.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    agent: Mapped[AgentName] = mapped_column(pg_enum(AgentName, "agent_name"), nullable=False)
+    event_type: Mapped[AgentEventType] = mapped_column(
+        pg_enum(AgentEventType, "agent_event_type"), nullable=False
+    )
+    tool_name: Mapped[str | None] = mapped_column(Text)
+    attempt: Mapped[int | None] = mapped_column(Integer)
+    payload: Mapped[dict] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
 
 
 class EvalRun(IdMixin, CreatedAtMixin, Base):

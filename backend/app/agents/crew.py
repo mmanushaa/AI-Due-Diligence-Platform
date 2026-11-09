@@ -24,6 +24,7 @@ import uuid
 from typing import Any
 
 from app.agents.baseline_single import MAX_REPLY_TOKENS
+from app.agents.events import record_tool_call
 from app.agents.tools import DataBlock, RepositoryTools, render_blocks
 from app.db.enums import AgentName
 from app.llm.client import LLMClient
@@ -166,17 +167,39 @@ def messages_for_gateway(messages: Any) -> list[dict[str, Any]]:
     return payload
 
 
-def read_only_tools(repository_tools: RepositoryTools, calls: list[str] | None = None) -> list[Any]:
+def read_only_tools(
+    repository_tools: RepositoryTools,
+    calls: list[str] | None = None,
+    *,
+    agent: AgentName | None = None,
+) -> list[Any]:
     """The three retrieval tools, and nothing that could change the machine.
 
     ``calls`` collects the name of every tool the model actually invoked, which is
     how a stage tells an investigation apart from an answer written from memory.
     There is no shell tool, no file writer and no network path here, so the worst
     a confused or injected model can do is ask for context it already had.
+
+    ``agent`` only labels the ``agent_events`` row each call writes. The guardrail
+    sees the same ``calls`` list it always did, so recording changes no decision:
+    a stage that does not pass an agent (a tool test, say) simply records nothing.
     """
     from crewai.tools import tool
 
     record = (calls if calls is not None else []).append
+
+    def note(name: str, arguments: dict[str, Any], text: str) -> None:
+        """Write one tool_call row: what was asked for, and how much came back."""
+        if agent is None:
+            return
+        record_tool_call(
+            repository_tools.session,
+            repository_tools.audit_id,
+            agent=agent,
+            tool_name=name,
+            arguments=arguments,
+            result_chars=len(text),
+        )
 
     @tool("retrieve_context")
     def retrieve_context_tool(query: str) -> str:
@@ -193,7 +216,9 @@ def read_only_tools(repository_tools: RepositoryTools, calls: list[str] | None =
             query,
             [block.file_path for block in blocks] or "nothing",
         )
-        return render_blocks(blocks) or "no indexed code matched that query"
+        text = render_blocks(blocks) or "no indexed code matched that query"
+        note("retrieve_context", {"query": query}, text)
+        return text
 
     @tool("get_symbol")
     def get_symbol_tool(name: str) -> str:
@@ -201,24 +226,33 @@ def read_only_tools(repository_tools: RepositoryTools, calls: list[str] | None =
         record("get_symbol")
         blocks = repository_tools.get_symbol(name)
         logger.debug("get_symbol(%r) -> %s", name, [block.file_path for block in blocks] or "nothing")
-        return render_blocks(blocks) or f"no symbol named {name!r} was found"
+        text = render_blocks(blocks) or f"no symbol named {name!r} was found"
+        note("get_symbol", {"name": name}, text)
+        return text
 
     @tool("read_finding")
     def read_finding_tool(finding_id: str) -> str:
         """Read one stored finding and its evidence, by the id in the findings list."""
         record("read_finding")
+        arguments = {"finding_id": str(finding_id)}
         try:
             view = repository_tools.read_finding(uuid.UUID(str(finding_id).strip()))
         except ValueError:
-            return f"{finding_id!r} is not a finding id"
+            text = f"{finding_id!r} is not a finding id"
+            note("read_finding", arguments, text)
+            return text
         if view is None:
-            return f"no finding {finding_id!r} in this audit"
+            text = f"no finding {finding_id!r} in this audit"
+            note("read_finding", arguments, text)
+            return text
         logger.debug("read_finding(%s) -> %s", finding_id, view.file_path)
-        return (
+        text = (
             f"{view.render()}\n"
             f'<<<DATA file="{view.file_path}" lines="{view.line_start}-{view.line_end}" '
             f'reason="evidence" untrusted="true">>>\n'
             f"{view.snippet}\n<<<END_DATA>>>"
         )
+        note("read_finding", arguments, text)
+        return text
 
     return [retrieve_context_tool, get_symbol_tool, read_finding_tool]

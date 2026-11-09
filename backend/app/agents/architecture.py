@@ -37,6 +37,7 @@ from sqlalchemy.orm import Session
 
 from app.agents.baseline_single import AgentOutcome
 from app.agents.crew import GatewayLLM, crew_llm, read_only_tools
+from app.agents.events import record_final_output, record_guardrail_failure
 from app.agents.prompts import fill, load_prompt
 from app.agents.schema import (
     AgentFinding,
@@ -365,6 +366,25 @@ def cycle_findings(facts: ArchitectureFacts) -> tuple[AgentFinding, ...]:
     return tuple(findings)
 
 
+def _refused(
+    repository_tools: RepositoryTools, attempt: int, raw: Any, feedback: str
+) -> tuple[bool, Any]:
+    """Record the answer that was refused, then hand CrewAI the same refusal.
+
+    Recording is the only thing added here: the tuple this returns is exactly what
+    the guardrail returned before, so retries and their limits are unchanged.
+    """
+    record_guardrail_failure(
+        repository_tools.session,
+        repository_tools.audit_id,
+        agent=AGENT_ROLE,
+        attempt=attempt,
+        raw_reply=str(raw),
+        reason=feedback,
+    )
+    return False, feedback
+
+
 def build_crew(
     repository_tools: RepositoryTools,
     llm: GatewayLLM,
@@ -375,11 +395,12 @@ def build_crew(
     from crewai import Agent, Crew, Process, Task
 
     prompt = load_prompt("architecture")
+    attempts: dict[str, int] = {}
     reviewer = Agent(
         role=prompt["role"],
         goal=prompt["goal"],
         backstory=prompt["backstory"],
-        tools=read_only_tools(repository_tools, calls),
+        tools=read_only_tools(repository_tools, calls, agent=AGENT_ROLE),
         llm=crew_llm(llm),
         allow_delegation=False,
         max_iter=MAX_ITERATIONS,
@@ -397,19 +418,27 @@ def build_crew(
         the js_app cycle into an unparseable reply in the first full run.
         """
         raw = getattr(output, "raw", output) or ""
+        attempts["review"] = attempts.get("review", 0) + 1
+        attempt = attempts["review"]
         try:
             report = parse_report(str(raw))
         except InvalidOutput:
-            return False, (
+            return _refused(
+                repository_tools,
+                attempt,
+                raw,
                 "That is not the JSON object from the contract. Reply with "
-                '{"findings": [...]} and nothing else - no prose, no Markdown list.'
+                '{"findings": [...]} and nothing else - no prose, no Markdown list.',
             )
         if report.findings and "retrieve_context" not in calls:
-            return False, (
+            return _refused(
+                repository_tools,
+                attempt,
+                raw,
                 "You have not read any code. Call retrieve_context with a question "
                 "about the modules you are about to cite (for example the largest "
                 "module or one end of a cycle), read what it returns, and only then "
-                "answer."
+                "answer.",
             )
         return True, output
 
@@ -496,6 +525,7 @@ def run_architecture_agent(
 
     latency_ms = int((time.monotonic() - started) * 1000)
     answer = _task_output(result, 0)
+    record_final_output(session, audit_id, agent=AGENT_ROLE, task="review", raw=answer)
     logger.debug("architecture answer: %s", answer[:4_000])
 
     try:

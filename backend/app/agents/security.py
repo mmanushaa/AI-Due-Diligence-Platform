@@ -45,6 +45,7 @@ from sqlalchemy.orm import Session
 
 from app.agents.baseline_single import AgentOutcome
 from app.agents.crew import GatewayLLM, crew_llm, read_only_tools
+from app.agents.events import record_final_outputs, record_guardrail_failure
 from app.agents.prompts import fill, load_prompt
 from app.agents.schema import AgentFinding, InvalidOutput, parse_report, validate_report
 from app.agents.store import ensure_index, store_findings
@@ -113,6 +114,25 @@ def _finding_lines(views: tuple[FindingView, ...]) -> str:
     )
 
 
+def _refused(
+    repository_tools: RepositoryTools, attempt: int, raw: Any, feedback: str
+) -> tuple[bool, Any]:
+    """Record the answer that was refused, then hand CrewAI the same refusal.
+
+    Recording is the only thing added here: the tuple this returns is exactly what
+    the guardrail returned before, so retries and their limits are unchanged.
+    """
+    record_guardrail_failure(
+        repository_tools.session,
+        repository_tools.audit_id,
+        agent=AGENT_ROLE,
+        attempt=attempt,
+        raw_reply=str(raw),
+        reason=feedback,
+    )
+    return False, feedback
+
+
 def build_crew(
     repository_tools: RepositoryTools,
     llm: GatewayLLM,
@@ -123,11 +143,12 @@ def build_crew(
 
     prompt = load_prompt("security")
     calls: list[str] = []
+    attempts: dict[str, int] = {}
     reviewer = Agent(
         role=prompt["role"],
         goal=prompt["goal"],
         backstory=prompt["backstory"],
-        tools=read_only_tools(repository_tools, calls),
+        tools=read_only_tools(repository_tools, calls, agent=AGENT_ROLE),
         llm=crew_llm(llm),
         allow_delegation=False,
         max_iter=MAX_ITERATIONS,
@@ -147,27 +168,38 @@ def build_crew(
         successful review of code it never opened.
         """
         raw = getattr(output, "raw", output) or ""
+        attempts["investigation"] = attempts.get("investigation", 0) + 1
+        attempt = attempts["investigation"]
         try:
             parse_report(str(raw))
         except InvalidOutput:
-            return False, (
+            return _refused(
+                repository_tools,
+                attempt,
+                raw,
                 "That is not the JSON object from the contract. Reply with "
-                '{"findings": [...]} and nothing else - no prose, no Markdown list.'
+                '{"findings": [...]} and nothing else - no prose, no Markdown list.',
             )
         if "retrieve_context" not in calls:
-            return False, (
+            return _refused(
+                repository_tools,
+                attempt,
+                raw,
                 "You have not searched this repository. Call retrieve_context with a "
                 "question about its route handlers (for example \"route handler that "
                 "returns a record by id\"), read the code it returns, and only then "
                 "answer. Re-reading a finding you already triaged is not an "
-                "investigation."
+                "investigation.",
             )
         if "get_symbol" not in calls:
-            return False, (
+            return _refused(
+                repository_tools,
+                attempt,
+                raw,
                 "You have not compared the handler against the repository's auth "
                 "helper. Call get_symbol with the helper's name (usually "
                 "get_current_user), look at which modules reference it, and cite the "
-                "handler that is missing it, not the helper that defines it."
+                "handler that is missing it, not the helper that defines it.",
             )
         return True, output
 
@@ -265,6 +297,12 @@ def run_security_agent(
     latency_ms = int((time.monotonic() - started) * 1000)
     triage_raw = _task_output(result, 0)
     investigation_raw = _task_output(result, 1)
+    record_final_outputs(
+        session,
+        audit_id,
+        agent=AGENT_ROLE,
+        outputs={"triage": triage_raw, "investigation": investigation_raw},
+    )
     logger.debug("security triage answer: %s", triage_raw[:2_000])
     logger.debug("security investigation answer: %s", investigation_raw[:4_000])
     verdicts = _parse_verdicts(triage_raw)

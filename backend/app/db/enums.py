@@ -140,6 +140,14 @@ class AgentName(str, enum.Enum):
     REPORTER = "reporter"
 
 
+class AgentEventType(str, enum.Enum):
+    """What a crew did, one row per occurrence in ``agent_events``."""
+
+    TOOL_CALL = "tool_call"
+    GUARDRAIL_FAILURE = "guardrail_failure"
+    FINAL_OUTPUT = "final_output"
+
+
 class EvalConfig(str, enum.Enum):
     SCANNERS_ONLY = "scanners_only"
     SINGLE_AGENT = "single_agent"
