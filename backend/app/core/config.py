@@ -49,8 +49,8 @@ class Settings(BaseSettings):
     # changing provider is a gateway change and not a code change. Triage is the
     # cheap model for first-pass classification; fallback is what a failed call
     # is retried against before the call is reported as failed.
-    llm_default_model: str = "gpt-4o-mini"
-    llm_triage_model: str = "gpt-4o-mini"
+    llm_default_model: str = "agent-default"
+    llm_triage_model: str = "agent-default"
     llm_fallback_model: str = "gpt-4o"
     llm_fallback_enabled: bool = True
     llm_max_output_tokens: int = 1_024

@@ -22,7 +22,10 @@
 # layers are deliberate: the gateway protects every client, the client protects
 # the audit budget and logs what actually happened.
 model_list:
-  - model_name: gpt-4o-mini
+  # An honest alias: the name says how it is used, not which vendor's model it
+  # imitates. The provider model actually behind it is
+  # LITELLM_UPSTREAM_DEFAULT_MODEL and is recorded with the run.
+  - model_name: agent-default
     litellm_params:
       model: os.environ/LITELLM_UPSTREAM_DEFAULT_MODEL
 

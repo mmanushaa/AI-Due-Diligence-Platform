@@ -43,6 +43,11 @@ def _parse(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--list", action="store_true", help="list configurations and exit")
     parser.add_argument("--no-save", action="store_true", help="do not write eval_runs/eval_results")
     parser.add_argument("--keep-audits", action="store_true", help="keep the throwaway audits")
+    parser.add_argument(
+        "--prune-after",
+        action="store_true",
+        help="delete the throwaway audits after saving the run (blanks its finding ids)",
+    )
     return parser.parse_args(argv)
 
 
@@ -93,6 +98,7 @@ def main(argv: list[str] | None = None) -> int:
         repos=tuple(args.repos) if args.repos else None,
         repos_root=DEFAULT_REPOS,
         keep_audits=args.keep_audits,
+        prune_after=args.prune_after,
         persist=not args.no_save,
     )
     print(report.render(record))

@@ -10,10 +10,11 @@ or imported.
 
 Two deliberate choices:
 
-* The audit and its repository are deleted afterwards unless ``keep_audits`` is
-  set. The durable record of a run is ``eval_runs`` plus one ``eval_results`` row
-  per expected issue; keeping the audits too would grow the database on every
-  invocation and make findings from different runs hard to tell apart.
+* A persisted run keeps its audit and repository, because ``eval_results`` names
+  the finding that satisfied each issue and deleting the audit would cascade to
+  those findings and blank the references. Pruning is the caller's job and happens
+  only when the run is not persisted, or when ``prune_after`` is passed; the run's
+  ``metrics`` then records ``pruned: true`` so a NULL id is never read as a bug.
 * ``eval_results.cost_usd`` and ``latency_ms`` are the repository's own cost and
   wall time, repeated on each of its rows because step 2.6b reads them there.
   They describe the run, not the issue, so never sum them down a repository.
@@ -32,7 +33,7 @@ from benchmark.harness import bootstrap
 
 bootstrap.add_backend_to_path()
 
-from sqlalchemy import func, select  # noqa: E402
+from sqlalchemy import delete, func, select  # noqa: E402
 from sqlalchemy.orm import Session, selectinload, sessionmaker  # noqa: E402
 
 from app.db.enums import AuditStatus, SourceType  # noqa: E402
@@ -114,6 +115,11 @@ class RepoEvaluation:
     scanner_status: dict[str, str] = field(default_factory=dict)
     agent_models: tuple[str, ...] = ()
     agent_outcome: dict[str, object] | None = None
+    # The throwaway audit and repository, kept only so the caller can prune them
+    # once the run is written. Nothing is deleted here: the findings they hold are
+    # what the persisted rows point at.
+    audit_id: uuid.UUID | None = None
+    repository_id: uuid.UUID | None = None
 
 
 @dataclass(frozen=True)
@@ -350,9 +356,12 @@ def evaluate_repo(
     snapshot: Path,
     *,
     session_factory: sessionmaker[Session] | None = None,
-    keep_audits: bool = False,
 ) -> RepoEvaluation:
-    """Run one configuration over one fixture and score it."""
+    """Run one configuration over one fixture and score it.
+
+    Nothing is deleted: the caller owns the throwaway audit and repository and
+    prunes them when it is done with the findings they hold.
+    """
     available, reason = configs.availability(configuration)
     if not available:
         raise configs.ConfigurationUnavailable(reason or "configuration unavailable")
@@ -403,14 +412,10 @@ def evaluate_repo(
             scanner_status=_scanner_status(session, audit.id),
             agent_models=agent_models,
             agent_outcome=agent_outcome,
+            audit_id=audit.id,
+            repository_id=repository.id,
         )
     finally:
-        if repository is not None and not keep_audits:
-            if audit is not None:
-                session.delete(audit)  # cascades findings, evidence, scanner_runs, agent_runs
-                session.commit()
-            session.delete(repository)
-            session.commit()
         session.close()
 
 
@@ -423,6 +428,7 @@ def _persist_run(
     evaluations: tuple[RepoEvaluation, ...],
     total: metrics.RepoScore,
     started_at: datetime,
+    pruned: bool = False,
 ) -> EvalRun:
     """Write one run with its per-issue and per-extra rows.
 
@@ -437,6 +443,9 @@ def _persist_run(
         metrics={
             "config": configuration.name,
             "manifest_version": manifest_version,
+            # Only set when the caller asked for pruning, so a NULL finding id is
+            # explained rather than mistaken for a lost measurement.
+            **({"pruned": True} if pruned else {}),
             "summary": configuration.summary,
             "stages": list(configuration.stages),
             "repo_count": len(evaluations),
@@ -506,6 +515,24 @@ def _persist_run(
     return eval_run
 
 
+def _prune_audits(session: Session, evaluations: tuple[RepoEvaluation, ...]) -> None:
+    """Delete the throwaway audits and repositories once the run is written.
+
+    Cascade rules take the findings with them, and the foreign keys then set
+    ``matched_finding_id``/``finding_id`` to NULL. That is why pruning is opt-in
+    for a persisted run and recorded in ``metrics`` when it happens.
+    """
+    audit_ids = [item.audit_id for item in evaluations if item.audit_id is not None]
+    repository_ids = [
+        item.repository_id for item in evaluations if item.repository_id is not None
+    ]
+    if audit_ids:
+        session.execute(delete(Audit).where(Audit.id.in_(audit_ids)))
+    if repository_ids:
+        session.execute(delete(Repository).where(Repository.id.in_(repository_ids)))
+    session.commit()
+
+
 def run_configuration(
     configuration: configs.Configuration,
     manifest: Manifest,
@@ -514,6 +541,7 @@ def run_configuration(
     repos_root: Path | None = None,
     session_factory: sessionmaker[Session] | None = None,
     keep_audits: bool = False,
+    prune_after: bool = False,
     persist: bool = True,
 ) -> RunRecord:
     """Evaluate one configuration over every selected repository.
@@ -536,36 +564,38 @@ def run_configuration(
             manifest.for_repo(repo),
             root / repo,
             session_factory=session_factory,
-            keep_audits=keep_audits,
         )
         for repo in selected
     )
     total = metrics.totals(tuple(evaluation.score for evaluation in evaluations))
 
-    if not persist:
-        return RunRecord(
-            eval_run_id=None,
-            configuration=configuration,
-            benchmark_version=BENCHMARK_VERSION,
-            evaluations=evaluations,
-            total=total,
-            started_at=started_at,
-        )
+    # A persisted run keeps its audits unless asked otherwise, so the ids it just
+    # wrote still resolve. An unpersisted run has nothing to protect and is pruned.
+    should_prune = not keep_audits and (prune_after or not persist)
 
     factory = session_factory or get_session_factory()
     session = factory()
+    eval_run_id: uuid.UUID | None = None
     try:
-        eval_run = _persist_run(
-            session,
-            configuration=configuration,
-            benchmark_version=BENCHMARK_VERSION,
-            manifest_version=manifest.version,
-            evaluations=evaluations,
-            total=total,
-            started_at=started_at,
-        )
-        eval_run_id = eval_run.id
+        if persist:
+            try:
+                eval_run_id = _persist_run(
+                    session,
+                    configuration=configuration,
+                    benchmark_version=BENCHMARK_VERSION,
+                    manifest_version=manifest.version,
+                    evaluations=evaluations,
+                    total=total,
+                    started_at=started_at,
+                    pruned=should_prune,
+                ).id
+            except Exception:
+                # _persist_run commits once, so a failure leaves no partial run.
+                session.rollback()
+                raise
     finally:
+        if should_prune:
+            _prune_audits(session, evaluations)
         session.close()
 
     return RunRecord(
