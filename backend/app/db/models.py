@@ -442,6 +442,38 @@ class EvalResult(IdMixin, CreatedAtMixin, Base):
     severity_correct: Mapped[bool | None] = mapped_column(Boolean)
     cost_usd: Mapped[Decimal | None] = mapped_column(Numeric(10, 4))
     latency_ms: Mapped[int | None] = mapped_column(Integer)
+    matched_finding_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("findings.id", ondelete="SET NULL")
+    )
+    matched_origin: Mapped[str | None] = mapped_column(Text)
+    matched_source_tool: Mapped[str | None] = mapped_column(Text)
+    matched_file: Mapped[str | None] = mapped_column(Text)
+    matched_line_start: Mapped[int | None] = mapped_column(Integer)
+    matched_line_end: Mapped[int | None] = mapped_column(Integer)
+    is_cross_file: Mapped[bool | None] = mapped_column(Boolean)
+    miss_reason: Mapped[str | None] = mapped_column(Text)
+
+
+class EvalExtras(IdMixin, CreatedAtMixin, Base):
+    """A finding that matched no expected issue, kept instead of discarded."""
+
+    __tablename__ = "eval_extras"
+
+    eval_run_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("eval_runs.id", ondelete="CASCADE"), nullable=False
+    )
+    finding_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("findings.id", ondelete="SET NULL")
+    )
+    repo: Mapped[str] = mapped_column(Text, nullable=False)
+    category: Mapped[str | None] = mapped_column(Text)
+    title: Mapped[str | None] = mapped_column(Text)
+    file: Mapped[str | None] = mapped_column(Text)
+    line_start: Mapped[int | None] = mapped_column(Integer)
+    line_end: Mapped[int | None] = mapped_column(Integer)
+    origin: Mapped[str | None] = mapped_column(Text)
+    source_tool: Mapped[str | None] = mapped_column(Text)
+    rejection_reason: Mapped[str | None] = mapped_column(Text)
 
 
 __all__ = [
@@ -451,6 +483,7 @@ __all__ = [
     "AuditLog",
     "CallEdge",
     "Chunk",
+    "EvalExtras",
     "EvalResult",
     "EvalRun",
     "Evidence",
