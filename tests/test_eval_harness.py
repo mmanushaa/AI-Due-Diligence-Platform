@@ -37,13 +37,20 @@ def issue(**overrides) -> ExpectedIssue:
 
 
 def finding(
-    category: str, path: str, start: int, end: int, severity: str = "high"
+    category: str,
+    path: str,
+    start: int,
+    end: int,
+    severity: str = "high",
+    title: str | None = None,
+    reasoning: str = "",
 ) -> matching.ReportedFinding:
     return matching.ReportedFinding(
         category=category,
         severity=severity,
         evidence=(matching.Span(file_path=path, line_start=start, line_end=end),),
-        title=f"{category} at {path}",
+        title=f"{category} at {path}" if title is None else title,
+        reasoning=reasoning,
     )
 
 
@@ -109,6 +116,124 @@ def test_findings_are_ordered_strongest_first_so_the_run_is_reproducible():
     ordered = matching.order_findings(findings)
 
     assert [item.severity for item in ordered] == ["high", "medium", "low"]
+
+
+# --------------------------------------------------------------------------- #
+# cycle matching
+# --------------------------------------------------------------------------- #
+
+
+def manifest() -> Manifest:
+    return load_manifest(BENCHMARK / "expected.json", REPOS)
+
+
+def cycle_issue(issue_id: str) -> ExpectedIssue:
+    return next(item for item in manifest().issues if item.id == issue_id)
+
+
+def test_a_finding_in_either_file_of_the_python_cycle_matches():
+    target = cycle_issue("py-cycle-01")
+    # orders.py at the import the manifest names
+    assert matching.matches(
+        target, finding("architecture", "app/orders.py", 5, 5, title="Circular import")
+    )
+    # billing.py at a line the manifest never names: a cycle spans files
+    assert matching.matches(
+        target, finding("architecture", "app/billing.py", 12, 12, title="Circular import")
+    )
+    # the wording may live in reasoning instead of the title
+    assert matching.matches(
+        target,
+        finding(
+            "architecture",
+            "app/billing.py",
+            1,
+            1,
+            title="Architecture concern",
+            reasoning="Orders and billing import each other, a circular dependency.",
+        ),
+    )
+
+
+def test_a_finding_in_either_file_of_the_javascript_cycle_matches():
+    target = cycle_issue("js-cycle-01")
+    assert matching.matches(
+        target, finding("architecture", "src/lib/queue.js", 3, 3, title="Circular require")
+    )
+    assert matching.matches(
+        target, finding("architecture", "src/lib/worker.js", 9, 9, title="Cyclic dependency")
+    )
+
+
+def test_an_architecture_finding_outside_the_cycle_does_not_match():
+    target = cycle_issue("py-cycle-01")
+    assert not matching.matches(
+        target, finding("architecture", "app/config.py", 5, 5, title="Circular import")
+    )
+    js_target = cycle_issue("js-cycle-01")
+    assert not matching.matches(
+        js_target, finding("architecture", "src/server.js", 3, 3, title="Circular require")
+    )
+
+
+def test_a_cycle_file_without_cycle_wording_does_not_match():
+    """An oversized-module finding in orders.py is not the cycle."""
+    target = cycle_issue("py-cycle-01")
+    assert not matching.matches(
+        target,
+        finding(
+            "architecture",
+            "app/orders.py",
+            5,
+            5,
+            title="Module has too many responsibilities",
+            reasoning="This file mixes persistence and presentation.",
+        ),
+    )
+    assert not matching.matches(
+        target, finding("architecture", "app/billing.py", 3, 3, title="Long function")
+    )
+
+
+def test_a_finding_in_another_repository_does_not_match():
+    python_target = cycle_issue("py-cycle-01")
+    assert not matching.matches(
+        python_target, finding("architecture", "src/lib/queue.js", 3, 3, title="Circular require")
+    )
+    js_target = cycle_issue("js-cycle-01")
+    assert not matching.matches(
+        js_target, finding("architecture", "app/orders.py", 5, 5, title="Circular import")
+    )
+
+
+def test_a_security_finding_in_a_cycle_file_does_not_match():
+    target = cycle_issue("py-cycle-01")
+    assert not matching.matches(
+        target, finding("security", "app/orders.py", 5, 5, title="Circular import")
+    )
+
+
+def test_a_matching_issue_without_cycle_files_keeps_the_line_rule():
+    plain = issue(
+        id="plain-arch-01", category="architecture", file="app/orders.py", line_start=5, line_end=5
+    )
+    assert plain.cycle_files == ()
+    assert matching.matches(plain, finding("architecture", "app/orders.py", 5, 5))
+    # same category and cycle wording, but no cycle_files: still a different file
+    assert not matching.matches(
+        plain, finding("architecture", "app/billing.py", 5, 5, title="Circular import")
+    )
+
+
+def test_a_cycle_file_missing_from_the_repo_is_rejected(tmp_path: Path):
+    raw = json.loads((BENCHMARK / "expected.json").read_text(encoding="utf-8"))
+    target = next(item for item in raw["issues"] if item["id"] == "py-cycle-01")
+    target["cycle_files"] = ["app/orders.py", "app/ghost.py"]
+    broken = tmp_path / "expected.json"
+    broken.write_text(json.dumps(raw), encoding="utf-8")
+
+    with pytest.raises(ManifestError, match="cycle file app/ghost.py"):
+        load_manifest(broken, REPOS)
 
 
 # --------------------------------------------------------------------------- #
@@ -252,7 +377,7 @@ def test_evidence_never_reads_outside_the_snapshot(tmp_path: Path):
 def test_the_manifest_agrees_with_the_fixtures():
     manifest = load_manifest(BENCHMARK / "expected.json", REPOS)
 
-    assert manifest.version == "0.4.0"
+    assert manifest.version == "0.5.0"
     assert manifest.repos == ("adversarial_app", "clean_app", "js_app", "python_app")
     # clean_app is the false-positive control: nothing planted, so every finding there is false
     assert manifest.for_repo("clean_app") == ()
@@ -264,7 +389,13 @@ def test_the_manifest_agrees_with_the_fixtures():
         "js-authz-01",
         "adv-export-authz-01",
         "adv-delete-authz-02",
+        # a cycle spans files, so it counts as cross-file
+        "py-cycle-01",
+        "js-cycle-01",
     }
+    # the answer key names the members of each cycle
+    assert cycle_issue("py-cycle-01").cycle_files == ("app/orders.py", "app/billing.py")
+    assert cycle_issue("js-cycle-01").cycle_files == ("src/lib/queue.js", "src/lib/worker.js")
 
 
 def test_a_manifest_that_cites_a_line_outside_the_file_is_rejected(tmp_path: Path):

@@ -36,6 +36,9 @@ class ExpectedIssue:
     severity: str
     detector: str
     cross_file: bool = False
+    # The files that make up a cycle, for issues that describe one. Empty for
+    # every other issue, which keeps the ordinary rule in charge of them.
+    cycle_files: tuple[str, ...] = ()
     sink_pattern: str | None = None
     package: str | None = None
     version: str | None = None
@@ -99,6 +102,7 @@ def _as_issue(raw: dict) -> ExpectedIssue:
         severity=str(raw["severity"]),
         detector=str(raw.get("detector", "")),
         cross_file=bool(raw.get("cross_file", False)),
+        cycle_files=tuple(str(item) for item in raw.get("cycle_files", ())),
         sink_pattern=raw.get("sink_pattern"),
         package=raw.get("package"),
         version=raw.get("version"),
@@ -136,6 +140,13 @@ def load_manifest(path: Path, repos_root: Path | None = None) -> Manifest:
             raise ManifestError(
                 f"issue {issue.id} cites line {issue.line_end} but {issue.file} has {line_count}"
             )
+        # A cycle's members are the answer key for cross-file matching, so a typo
+        # must fail here rather than quietly making the cycle unmatchable.
+        for member in issue.cycle_files:
+            if not (root / issue.repo / member).is_file():
+                raise ManifestError(
+                    f"issue {issue.id} lists cycle file {member}, which is not in {issue.repo}"
+                )
 
     return Manifest(
         version=str(raw.get("benchmark_version", "unknown")), issues=issues, repos=repos

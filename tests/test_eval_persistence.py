@@ -29,6 +29,7 @@ from app.db.models import Audit, Evidence, Finding, Repository
 from app.db.session import get_session_factory
 from benchmark.harness import configs, metrics
 from benchmark.harness.runner import (
+    BENCHMARK_VERSION,
     MISS_NO_MATCH,
     ExtraFinding,
     IssueOutcome,
@@ -186,7 +187,8 @@ def test_a_persisted_run_keeps_every_instrumented_column(stored_findings):
         eval_run = _persist_run(
             session,
             configuration=configs.get("single_agent"),
-            benchmark_version="2",
+            benchmark_version=BENCHMARK_VERSION,
+            manifest_version="0.5.0",
             evaluations=(evaluation,),
             total=metrics.totals((evaluation.score,)),
             started_at=datetime.now(timezone.utc),
@@ -291,7 +293,8 @@ def test_every_matched_finding_id_points_at_a_real_finding(stored_findings):
         run_id = _persist_run(
             session,
             configuration=configs.get("single_agent"),
-            benchmark_version="2",
+            benchmark_version=BENCHMARK_VERSION,
+            manifest_version="0.5.0",
             evaluations=(evaluation,),
             total=metrics.totals((evaluation.score,)),
             started_at=datetime.now(timezone.utc),

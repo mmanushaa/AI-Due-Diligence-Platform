@@ -1,5 +1,5 @@
 {
-  "benchmark_version": "0.4.0",
+  "benchmark_version": "0.5.0",
   "notes": [
     "Fixture repositories under benchmark/repos/ are test data. Never execute them.",
     "Every entry cites a real file and exact line range in this repository.",
@@ -80,6 +80,8 @@
       "line_end": 5,
       "severity": "low",
       "detector": "architecture",
+      "cycle_files": ["app/orders.py", "app/billing.py"],
+      "cross_file": true,
       "notes": "Cycle: app/orders.py:5 -> app/billing.py:3 -> app/orders.py."
     },
     {
@@ -164,6 +166,8 @@
       "line_end": 3,
       "severity": "low",
       "detector": "architecture",
+      "cycle_files": ["src/lib/queue.js", "src/lib/worker.js"],
+      "cross_file": true,
       "notes": "Cycle: src/lib/queue.js:3 -> src/lib/worker.js:3 -> src/lib/queue.js."
     },
     {

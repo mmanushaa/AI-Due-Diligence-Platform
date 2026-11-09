@@ -145,6 +145,12 @@ def _now() -> datetime:
 # configurations never call a model, so they are left unlimited.
 DEFAULT_AGENT_BUDGET_USD = Decimal("0.25")
 
+# The matching rubric this harness implements. Bump it whenever the rule in
+# matching.py changes, so two runs are never compared as if they were measured
+# the same way. The manifest has its own version, which describes the fixture
+# set and is recorded separately as ``manifest_version``.
+BENCHMARK_VERSION = "2"
+
 
 def _fixture_name(configuration: configs.Configuration, repo: str) -> str:
     """A repository name unique per invocation, so repeated runs never collide."""
@@ -205,6 +211,7 @@ def _load_findings(session: Session, audit_id: uuid.UUID) -> tuple[LoadedFinding
                     severity=finding.severity.value,
                     evidence=spans,
                     title=finding.title,
+                    reasoning=finding.reasoning or "",
                 ),
             )
         )
@@ -412,6 +419,7 @@ def _persist_run(
     *,
     configuration: configs.Configuration,
     benchmark_version: str,
+    manifest_version: str,
     evaluations: tuple[RepoEvaluation, ...],
     total: metrics.RepoScore,
     started_at: datetime,
@@ -428,6 +436,7 @@ def _persist_run(
         started_at=started_at,
         metrics={
             "config": configuration.name,
+            "manifest_version": manifest_version,
             "summary": configuration.summary,
             "stages": list(configuration.stages),
             "repo_count": len(evaluations),
@@ -537,7 +546,7 @@ def run_configuration(
         return RunRecord(
             eval_run_id=None,
             configuration=configuration,
-            benchmark_version=manifest.version,
+            benchmark_version=BENCHMARK_VERSION,
             evaluations=evaluations,
             total=total,
             started_at=started_at,
@@ -549,7 +558,8 @@ def run_configuration(
         eval_run = _persist_run(
             session,
             configuration=configuration,
-            benchmark_version=manifest.version,
+            benchmark_version=BENCHMARK_VERSION,
+            manifest_version=manifest.version,
             evaluations=evaluations,
             total=total,
             started_at=started_at,
@@ -561,7 +571,7 @@ def run_configuration(
     return RunRecord(
         eval_run_id=eval_run_id,
         configuration=configuration,
-        benchmark_version=manifest.version,
+        benchmark_version=BENCHMARK_VERSION,
         evaluations=evaluations,
         total=total,
         started_at=started_at,

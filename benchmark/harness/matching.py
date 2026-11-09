@@ -7,6 +7,14 @@ A reported finding matches an expected issue when all three hold:
                          the snapshot root, so a suffix match is allowed
     overlapping lines    the two ranges share at least one line
 
+An issue that names its cycle files (``cycle_files`` in the manifest) matches by a
+second rule, because a cycle spans several files and the ordinary rule would score
+a correct report as a miss for citing the other end of it: the category must
+agree, the finding may cite *any* member file at *any* line, and its title or
+reasoning must say "cycle", "cyclic" or "circular". The wording check is what
+stops an unrelated architecture finding in a cycle file, such as an oversized
+module, from being counted as the cycle. Every other issue keeps the rule above.
+
 Nothing else is inferred. A finding that cites the wrong file, the wrong region or
 the wrong category is a miss *and* a false positive, which is the point: the
 benchmark measures the location, not the vague topic.
@@ -78,6 +86,10 @@ class ReportedFinding:
     severity: str
     evidence: tuple[Span, ...]
     title: str = ""
+    # The finding's own explanation, when the pipeline stored one. The cycle rule
+    # reads it so a finding can say "circular dependency" in prose rather than in
+    # its one-line title.
+    reasoning: str = ""
 
     @property
     def location(self) -> Span | None:
@@ -142,10 +154,27 @@ class MatchOutcome:
         return len(self.assignments) + len(self.false_positives)
 
 
+CYCLE_WORDS = ("cycle", "cyclic", "circular")
+
+
+def mentions_cycle(finding: ReportedFinding) -> bool:
+    """Whether the finding says, in its own words, that it reports a cycle."""
+    text = f"{finding.title} {finding.reasoning}".lower()
+    return any(word in text for word in CYCLE_WORDS)
+
+
 def matches(issue: ExpectedIssue, finding: ReportedFinding) -> bool:
     """Whether one finding reports this expected issue."""
     if issue.category.lower() != finding.category.lower():
         return False
+    if issue.cycle_files:
+        if not mentions_cycle(finding):
+            return False
+        return any(
+            same_file(member, span.file_path)
+            for span in finding.evidence
+            for member in issue.cycle_files
+        )
     for span in finding.evidence:
         if not same_file(issue.file, span.file_path):
             continue
