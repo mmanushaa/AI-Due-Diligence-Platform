@@ -413,7 +413,7 @@ def test_scanners_only_runs_today_and_agent_configurations_explain_themselves():
     assert configs.availability(scanners_only) == (True, None)
     assert scanners_only in configs.runnable()
     # step 2.7 registered the baseline, so this configuration is live now
-    assert configs.availability(configs.get("single_agent")) == (True, None)
+    assert configs.availability(configs.get("single_agent_no_tools")) == (True, None)
 
     for configuration in configs.CONFIGURATIONS:
         available, reason = configs.availability(configuration)

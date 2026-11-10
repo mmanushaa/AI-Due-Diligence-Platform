@@ -2,8 +2,9 @@
 
 Options:
 
-    --config NAME     scanners_only (default), single_agent, multi_agent,
-                      multi_agent_validated
+    --config NAME     scanners_only (default), single_agent_no_tools,
+                      single_agent_tools, multi_agent, multi_agent_validated,
+                      scanners_plus_deterministic
     --repo NAME       limit to one fixture repository; repeatable
     --list            show every configuration and whether it can run here
     --no-save         run and print without writing eval_runs/eval_results

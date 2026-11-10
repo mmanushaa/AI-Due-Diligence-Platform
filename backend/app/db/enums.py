@@ -149,10 +149,20 @@ class AgentEventType(str, enum.Enum):
 
 
 class EvalConfig(str, enum.Enum):
+    """What a benchmark run measured, named so two runs are comparable.
+
+    ``single_agent`` was renamed to ``single_agent_no_tools`` when step 2.6f added
+    a tool-using single agent: the old name described a configuration that no
+    longer was the only single-agent one, and stored runs were renamed with the
+    label so an old run keeps naming the configuration it actually ran.
+    """
+
     SCANNERS_ONLY = "scanners_only"
-    SINGLE_AGENT = "single_agent"
+    SINGLE_AGENT_NO_TOOLS = "single_agent_no_tools"
+    SINGLE_AGENT_TOOLS = "single_agent_tools"
     MULTI_AGENT = "multi_agent"
     MULTI_AGENT_VALIDATED = "multi_agent_validated"
+    SCANNERS_PLUS_DETERMINISTIC = "scanners_plus_deterministic"
 
 
 def pg_enum(enum_cls: type[enum.Enum], name: str) -> SAEnum:

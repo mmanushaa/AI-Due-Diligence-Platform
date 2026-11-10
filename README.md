@@ -336,17 +336,20 @@ backend/.venv/Scripts/python -m benchmark.harness --config scanners_only  # full
 backend/.venv/Scripts/python -m benchmark.harness --repo clean_app --no-save
 ```
 
-The four configurations are `scanners_only`, `single_agent`, `multi_agent` and
-`multi_agent_validated`. A configuration runs when `app.agents.STAGES` has a stage for it;
-otherwise it is reported as unavailable and exits `2` instead of scoring zero recall for a
-layer that never ran. `single_agent` and `multi_agent` are registered today, so the other
-two are the ones that explain themselves.
+The six configurations are `scanners_only`, `single_agent_no_tools`, `single_agent_tools`,
+`multi_agent`, `multi_agent_validated` and `scanners_plus_deterministic`. A configuration
+runs when `app.agents.STAGES` has a stage for it; otherwise it is reported as unavailable and
+exits `2` instead of scoring zero recall for a layer that never ran. Everything except
+`multi_agent_validated` is registered today, so that is the one that explains itself.
 
 Agent configurations get a small `audits.budget_usd` on their throwaway audit, so a
 misbehaving agent stops the run instead of spending without a ceiling. The stage's own
 outcome (model, calls, accepted and rejected findings, cost, errors) is printed under the
 table and stored in `eval_runs.metrics["agents"]`, which is how a run that never reached the
-model is told apart from an agent that found nothing.
+model is told apart from an agent that found nothing. Every run also stores
+`eval_runs.metrics["limits"]` — the tools, turns, guardrail retries, reply budget and spend
+ceiling it ran under — so a stored run says what it was allowed to do without a reader
+having to date the code.
 
 Matching requires the same category, the same file and an overlapping line range, one
 finding per expected issue. `dup` counts findings that repeat an already-matched issue — OSV
@@ -412,9 +415,9 @@ outcome.accepted, outcome.rejected, outcome.dropped, outcome.errors
 Without a provider key the gateway answers every call with `401`, so the stage stores nothing
 and says so in its outcome instead of pretending to have reviewed the repository. Point
 `LITELLM_UPSTREAM_*` at a provider whose key is in `.env`, recreate the gateway and re-run
-`--config single_agent`.
+`--config single_agent_no_tools`.
 
-single_agent, benchmark 0.4.0 (one call per repository, $0.0026 total): recall 12/18,
+single_agent_no_tools, benchmark 0.4.0 (one call per repository, $0.0026 total): recall 12/18,
 precision 12/13, false-positive rate 1/13, evidence 12/12, severity 12/12, cross-file recall
 0/6. The seven findings it added are six restatements of what the scanners had already
 reported and one false positive (a module docstring in config code), so single-agent
@@ -472,7 +475,8 @@ outcome.accepted, outcome.rejected, outcome.calls, outcome.cost_usd
 
 multi_agent, benchmark 0.4.0 (one crew per repository, five to seven model calls,
 $0.0131 total, 823s): recall 14/18, precision 14/16, false-positive rate 2/16, evidence
-14/14, severity 14/14, cross-file recall 3/6 — against single_agent's 12/18, 12/13, 1/13,
+14/14, severity 14/14, cross-file recall 3/6 — against single_agent_no_tools's 12/18, 12/13,
+1/13,
 12/12, 12/12, 0/6 for $0.0026 and 178s. The two issues it adds are access-control gaps no
 scanner can see from one file: the unauthenticated export route in `adversarial_app` and the
 unauthenticated admin route in `js_app`. Everything it reports at the right file is cited

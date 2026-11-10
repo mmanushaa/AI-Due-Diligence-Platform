@@ -109,6 +109,34 @@ repositories that look like this one. Two handlers that reach the same table,
 where only one checks the caller, is worth more than any number of findings you
 cannot point at.
 
+## review
+
+Review this repository once, for every category the audit reports, in a single
+answer. You are the whole review: there is no second task to cover what you leave
+out.
+
+Start with `retrieve_context` — a route or handler that returns a record by id is
+where the access-control problems are — then `get_symbol` on the auth helper and on
+the data-access function that handler calls. `read_finding` shows a scanner finding
+with the code around it, which is the fastest way to judge one.
+
+Cover, in this order:
+
+1. Security: a route or handler that reads or changes a row without checking who
+the caller is or whether they own it; a query built from untrusted input by
+   formatting, concatenation or template interpolation; a committed credential.
+   Add a scanner finding only when you can cite the cross-file reasoning the
+   scanner could not see — otherwise you are repeating it, not finding it.
+2. Architecture: two modules that import each other, a module taking a decision
+   another module owns, or a module so large that its size is the problem.
+3. License: a copyleft dependency (GPL, AGPL, SSPL) declared in a manifest such as
+   `requirements.txt` or `package.json`, cited at the line that declares it — and
+   only when no scanner already reported it.
+
+Cite the route or handler that should change, not the shared helper that proves
+the problem. One finding per distinct problem. An empty list is a valid answer
+when the repository has nothing to add.
+
 ## json_contract
 
 Answer with this JSON object and nothing else:

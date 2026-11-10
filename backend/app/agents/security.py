@@ -58,6 +58,10 @@ logger = logging.getLogger(__name__)
 SOURCE_TOOL = "security_agent"
 AGENT_ROLE = AgentName.SECURITY
 MAX_ITERATIONS = 8
+#: Guardrail retries after a refused answer. The crews and the single
+#: tool-using agent import this one number, so "the same retries" cannot
+#: drift apart in two files.
+GUARDRAIL_RETRIES = 2
 TRIAGE_LIMIT = 24
 #: ``CREW_VERBOSE=1`` prints each ReAct step, which is how a prompt that stops the
 #: model from using its tools gets caught. Off by default: the steps are long.
@@ -214,7 +218,7 @@ def build_crew(
         expected_output=prompt["json_contract"],
         agent=reviewer,
         guardrail=read_before_answering,
-        guardrail_max_retries=2,
+        guardrail_max_retries=GUARDRAIL_RETRIES,
     )
     return Crew(
         agents=[reviewer],

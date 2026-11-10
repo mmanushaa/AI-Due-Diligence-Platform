@@ -146,11 +146,6 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-# A model-driven configuration gets a budget on its throwaway audit, so a
-# misbehaving agent stops the run instead of spending without a ceiling. Scanner
-# configurations never call a model, so they are left unlimited.
-DEFAULT_AGENT_BUDGET_USD = Decimal("0.25")
-
 # The matching rubric this harness implements. Bump it whenever the rule in
 # matching.py changes, so two runs are never compared as if they were measured
 # the same way. The manifest has its own version, which describes the fixture
@@ -180,7 +175,9 @@ def _import_fixture(
         repository_id=repository.id,
         status=AuditStatus.QUEUED,
         config={"eval_config": configuration.name, "fixture_repo": repo},
-        budget_usd=DEFAULT_AGENT_BUDGET_USD if configuration.uses_agent_stage else None,
+        # The ceiling comes from the configuration's own limits, which are the
+        # same numbers stored in the run's metrics.
+        budget_usd=configuration.limits.budget_usd,
     )
     session.add(audit)
     session.commit()
@@ -448,6 +445,9 @@ def _persist_run(
             **({"pruned": True} if pruned else {}),
             "summary": configuration.summary,
             "stages": list(configuration.stages),
+            # What this configuration was allowed to use: tools, turns, retries,
+            # reply budget and the spend ceiling applied to the audit above.
+            "limits": configuration.limits.as_json(),
             "repo_count": len(evaluations),
             "totals": total.to_json(),
             "repos": [evaluation.score.to_json() for evaluation in evaluations],

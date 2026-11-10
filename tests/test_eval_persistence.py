@@ -186,7 +186,7 @@ def test_a_persisted_run_keeps_every_instrumented_column(stored_findings):
     try:
         eval_run = _persist_run(
             session,
-            configuration=configs.get("single_agent"),
+            configuration=configs.get("single_agent_no_tools"),
             benchmark_version=BENCHMARK_VERSION,
             manifest_version="0.5.0",
             evaluations=(evaluation,),
@@ -276,6 +276,16 @@ def test_a_persisted_run_keeps_every_instrumented_column(stored_findings):
         assert extra["rejection_reason"] is None
 
         assert stored_metrics["models"] == {REPO: [MODEL]}
+        # Step 2.6f: every run records what it was allowed to use.
+        assert stored_metrics["limits"] == {
+            "tools": [],
+            "max_iter": None,
+            "guardrail_retries": None,
+            "reply_retries": 1,
+            "max_tokens": 4_096,
+            "budget_usd": "0.25",
+            "calls_model": True,
+        }
     finally:
         with factory() as cleanup:
             cleanup.execute(text("DELETE FROM eval_runs WHERE id = :run"), {"run": run_id})
@@ -292,7 +302,7 @@ def test_every_matched_finding_id_points_at_a_real_finding(stored_findings):
     try:
         run_id = _persist_run(
             session,
-            configuration=configs.get("single_agent"),
+            configuration=configs.get("single_agent_no_tools"),
             benchmark_version=BENCHMARK_VERSION,
             manifest_version="0.5.0",
             evaluations=(evaluation,),

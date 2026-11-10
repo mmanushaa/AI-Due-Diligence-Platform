@@ -60,6 +60,8 @@ logger = logging.getLogger(__name__)
 SOURCE_TOOL = "architecture_agent"
 AGENT_ROLE = AgentName.ARCHITECTURE
 MAX_ITERATIONS = 8
+#: Guardrail retries after a refused answer, shared with the security crew.
+GUARDRAIL_RETRIES = 2
 #: A module has to be this many lines, *and* this many times the median, before it
 #: is worth calling large. Both, because a repository of small files has no large
 #: module and a repository of large files has no outlier.
@@ -447,7 +449,7 @@ def build_crew(
         expected_output=prompt["json_contract"],
         agent=reviewer,
         guardrail=reviewed_before_answering,
-        guardrail_max_retries=2,
+        guardrail_max_retries=GUARDRAIL_RETRIES,
     )
     return Crew(agents=[reviewer], tasks=[review], process=Process.sequential, verbose=False)
 

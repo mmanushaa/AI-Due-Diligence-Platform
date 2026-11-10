@@ -207,8 +207,8 @@ def stored_findings(session, audit_id) -> list[Finding]:
 # --------------------------------------------------------------------------- #
 
 
-def test_the_stage_is_registered_as_the_single_agent_configuration():
-    assert STAGES[EvalConfig.SINGLE_AGENT] is run_baseline_single
+def test_the_stage_is_registered_as_the_single_agent_no_tools_configuration():
+    assert STAGES[EvalConfig.SINGLE_AGENT_NO_TOOLS] is run_baseline_single
 
 
 def test_the_stage_builds_the_index_it_needs_when_the_audit_has_only_files(snapshot):
