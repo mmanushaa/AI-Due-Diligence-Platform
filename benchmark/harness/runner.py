@@ -426,6 +426,7 @@ def _persist_run(
     total: metrics.RepoScore,
     started_at: datetime,
     pruned: bool = False,
+    label: str | None = None,
 ) -> EvalRun:
     """Write one run with its per-issue and per-extra rows.
 
@@ -439,6 +440,9 @@ def _persist_run(
         started_at=started_at,
         metrics={
             "config": configuration.name,
+            # A caller's own name for the run ("repeat-1"), kept out of the
+            # configuration so repeat runs stay comparable.
+            **({"label": label} if label else {}),
             "manifest_version": manifest_version,
             # Only set when the caller asked for pruning, so a NULL finding id is
             # explained rather than mistaken for a lost measurement.
@@ -543,6 +547,7 @@ def run_configuration(
     keep_audits: bool = False,
     prune_after: bool = False,
     persist: bool = True,
+    label: str | None = None,
 ) -> RunRecord:
     """Evaluate one configuration over every selected repository.
 
@@ -588,6 +593,7 @@ def run_configuration(
                     total=total,
                     started_at=started_at,
                     pruned=should_prune,
+                    label=label,
                 ).id
             except Exception:
                 # _persist_run commits once, so a failure leaves no partial run.

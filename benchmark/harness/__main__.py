@@ -10,6 +10,7 @@ Options:
     --no-save         run and print without writing eval_runs/eval_results
     --keep-audits     keep the throwaway audits instead of deleting them
     --manifest PATH   a different expected.json
+    --label NAME      stored in eval_runs.metrics["label"], e.g. repeat-1
 
 Exit status: 0 when the run completed, 2 when the requested configuration cannot
 run in this checkout, 1 on any other failure.
@@ -41,6 +42,11 @@ def _parse(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--config", default="scanners_only", help="configuration to evaluate")
     parser.add_argument("--repo", action="append", dest="repos", help="fixture repository (repeatable)")
     parser.add_argument("--manifest", default=str(DEFAULT_MANIFEST), help="expected.json to score against")
+    parser.add_argument(
+        "--label",
+        default=None,
+        help="store this label in eval_runs.metrics, e.g. repeat-1 for a repeated run",
+    )
     parser.add_argument("--list", action="store_true", help="list configurations and exit")
     parser.add_argument("--no-save", action="store_true", help="do not write eval_runs/eval_results")
     parser.add_argument("--keep-audits", action="store_true", help="keep the throwaway audits")
@@ -101,6 +107,7 @@ def main(argv: list[str] | None = None) -> int:
         keep_audits=args.keep_audits,
         prune_after=args.prune_after,
         persist=not args.no_save,
+        label=args.label,
     )
     print(report.render(record))
     if not args.no_save:
