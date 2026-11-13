@@ -26,6 +26,7 @@ from benchmark.harness import bootstrap
 
 bootstrap.add_backend_to_path()
 
+from app.core.logmask import install_log_masking  # noqa: E402
 from benchmark.harness import configs, report, runner  # noqa: E402
 from benchmark.harness.expected import ManifestError, load_manifest  # noqa: E402
 
@@ -69,6 +70,10 @@ def _print_configurations() -> None:
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse(argv)
+    # The harness prints agent outcomes and passes model replies around, so every
+    # line this process emits is masked, including the ones the pipeline it drives
+    # writes. Installed here rather than at import: logging has to exist first.
+    install_log_masking()
 
     if args.list:
         _print_configurations()

@@ -7,6 +7,11 @@ reports. This module installs one filter on the handlers that will actually rece
 the record, rather than on a logger, because a filter on a logger only sees records
 created by that logger and not those of its children.
 
+It is installed by the entry point, once logging is configured: the API's lifespan
+startup and ``benchmark.harness.__main__.main``. Calling it at import time masked
+the handlers that happened to exist then - usually none - and every handler created
+afterwards wrote unmasked lines, which is the opposite of the guarantee.
+
 ``install_log_masking`` is idempotent and safe to call from the API, the worker and
 the benchmark harness.
 """
@@ -50,15 +55,34 @@ class MaskingFormatter(logging.Formatter):
         return mask_secrets(super().format(record))
 
 
+def _mask_handler(handler: logging.Handler) -> None:
+    """Filter one handler and keep its format, date format and style."""
+    if not any(isinstance(item, SecretMaskFilter) for item in handler.filters):
+        handler.addFilter(SecretMaskFilter())
+    if isinstance(handler.formatter, MaskingFormatter):
+        return
+    existing = handler.formatter
+    fmt = getattr(existing, "_fmt", None) or "%(message)s"
+    datefmt = getattr(existing, "datefmt", None)
+    handler.setFormatter(MaskingFormatter(fmt, datefmt))
+
+
 def install_log_masking(handlers: Iterable[logging.Handler] | None = None) -> None:
     """Attach the filter to every handler that will emit a line.
 
-    Called with no argument it covers the root logger's handlers; a test can pass
-    its own capture handler instead. Handlers added after the call are the caller's
-    to wrap, which is why the API installs this once logging is configured.
+    Called with no argument it covers the root logger's handlers, gives the process
+    one handler if it has none (a record with no handler goes to
+    ``logging.lastResort``, which no filter on the root logger can reach), and masks
+    that fallback too. A test can pass its own capture handler instead.
     """
-    targets = list(handlers) if handlers is not None else list(logging.getLogger().handlers)
+    if handlers is None:
+        if not logging.getLogger().handlers:
+            # No level: basicConfig would otherwise reset the process's log level.
+            logging.basicConfig()
+        targets: list[logging.Handler] = list(logging.getLogger().handlers)
+        if isinstance(logging.lastResort, logging.Handler):
+            targets.append(logging.lastResort)
+    else:
+        targets = list(handlers)
     for handler in targets:
-        if not any(isinstance(item, SecretMaskFilter) for item in handler.filters):
-            handler.addFilter(SecretMaskFilter())
-        handler.setFormatter(MaskingFormatter(handler.formatter._fmt or "%(message)s"))
+        _mask_handler(handler)
