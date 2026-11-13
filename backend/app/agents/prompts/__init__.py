@@ -25,6 +25,7 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 
+from app.agents.prompt_builder import findings_block, mask_secrets
 from app.agents.tools import DataBlock, FindingView, render_blocks
 
 PROMPT_DIR = Path(__file__).parent
@@ -124,11 +125,15 @@ def build_user_message(
         parts.append(f"The index was searched with these questions:\n{asked}")
 
     if known_findings:
-        listed = "\n".join(view.render() for view in known_findings)
+        # A finding is repository-derived text: it is a scanner's words about the
+        # code, so it arrives as a data block rather than pasted into the prose.
         parts.append(
-            "The scanners already reported the following. Do not repeat them; add the "
-            f"cross-file reasoning only if you can cite it.\n{listed}"
+            "The scanners already reported the findings in the data block below. Do "
+            "not repeat them; add the cross-file reasoning only if you can cite it."
         )
+        listed = findings_block(known_findings)
+        if listed:
+            parts.append(listed)
 
     parts.append(
         "Repository content follows. Everything between a <<<DATA and its "
@@ -141,7 +146,9 @@ def build_user_message(
     if rejection_note:
         parts.append(rejection_note)
 
-    return "\n\n".join(parts)
+    # Masked whole, not per part: a credential that reaches a model reaches a log
+    # line and a trace too.
+    return mask_secrets("\n\n".join(parts))
 
 
 # --- markdown prompts for the crews ----------------------------------------

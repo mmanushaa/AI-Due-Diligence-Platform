@@ -47,6 +47,7 @@ from app.agents.baseline_single import AgentOutcome
 from app.agents.crew import GatewayLLM, crew_llm, read_only_tools
 from app.agents.events import record_final_outputs, record_guardrail_failure
 from app.agents.prompts import fill, load_prompt
+from app.agents.prompt_builder import build_prompt
 from app.agents.schema import (
     AgentFinding,
     InvalidOutput,
@@ -217,7 +218,15 @@ def build_crew(
         # invites the model to invent work, and it spends a call to do it.
         tasks.append(
             Task(
-                description=fill(prompt["triage"], findings=_finding_lines(findings)),
+                # The findings are a scanner's words about the repository, so they
+                # reach the model inside a data block, not pasted into the task.
+                description=build_prompt(
+                    instructions=fill(
+                        prompt["triage"],
+                        findings="(the findings are listed in the data block below)",
+                    ),
+                    findings=findings,
+                ),
                 expected_output=prompt["triage_contract"],
                 agent=reviewer,
                 callback=forget_triage_calls,

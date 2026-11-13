@@ -39,6 +39,7 @@ from app.agents.baseline_single import AgentOutcome
 from app.agents.crew import GatewayLLM, crew_llm, read_only_tools
 from app.agents.events import record_final_output, record_guardrail_failure
 from app.agents.prompts import fill, load_prompt
+from app.agents.prompt_builder import build_prompt
 from app.agents.schema import (
     AgentFinding,
     AgentReport,
@@ -445,7 +446,13 @@ def build_crew(
         return True, output
 
     review = Task(
-        description=fill(prompt["review"], facts=facts.render()),
+        description=build_prompt(
+            instructions=fill(
+                prompt["review"],
+                facts="(the module graph facts are in the data block below)",
+            ),
+            facts=facts.render(),
+        ),
         expected_output=prompt["json_contract"],
         agent=reviewer,
         guardrail=reviewed_before_answering,
