@@ -30,6 +30,7 @@ from app.agents.deterministic import DeterministicOutcome, run_deterministic_gra
 from app.agents.multi import MultiAgentOutcome, run_multi_agent
 from app.agents.security import SecurityOutcome, run_security_agent
 from app.agents.single_tools import SingleToolsOutcome, run_single_agent_tools
+from app.agents.validated import ValidatedOutcome, run_multi_agent_validated
 from app.db.enums import EvalConfig
 
 AgentStage = Callable[[Session, uuid.UUID], Any]
@@ -38,6 +39,7 @@ STAGES: Mapping[EvalConfig, AgentStage] = {
     EvalConfig.SINGLE_AGENT_NO_TOOLS: run_baseline_single,
     EvalConfig.SINGLE_AGENT_TOOLS: run_single_agent_tools,
     EvalConfig.MULTI_AGENT: run_multi_agent,
+    EvalConfig.MULTI_AGENT_VALIDATED: run_multi_agent_validated,
     EvalConfig.SCANNERS_PLUS_DETERMINISTIC: run_deterministic_graph,
 }
 
@@ -54,10 +56,12 @@ __all__ = [
     "MultiAgentOutcome",
     "SecurityOutcome",
     "SingleToolsOutcome",
+    "ValidatedOutcome",
     "run_architecture_agent",
     "run_baseline_single",
     "run_deterministic_graph",
     "run_multi_agent",
+    "run_multi_agent_validated",
     "run_security_agent",
     "run_single_agent_tools",
 ]

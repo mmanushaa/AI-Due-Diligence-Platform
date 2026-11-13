@@ -85,14 +85,23 @@ def test_the_old_single_agent_name_is_gone_rather_than_kept_as_a_synonym():
         configs.get("single_agent")
 
 
-def test_five_configurations_can_run_and_the_validation_pass_is_the_one_that_cannot():
+def test_every_configuration_can_run_now_that_the_validation_pass_exists():
     names = tuple(configuration.name for configuration in configs.runnable())
     assert names == (
         "scanners_only",
         "single_agent_no_tools",
         "single_agent_tools",
         "multi_agent",
+        "multi_agent_validated",
         "scanners_plus_deterministic",
     )
+    assert configs.get("multi_agent_validated").stages[-1] == "validation"
+
+
+def test_a_configuration_whose_stage_is_missing_is_unavailable(monkeypatch):
+    """The rule that kept multi_agent_validated out before step 2.10 landed."""
+    monkeypatch.setattr(configs, "agent_stages", lambda: {})
+
     available, reason = configs.availability(configs.get("multi_agent_validated"))
+
     assert available is False and configs.AGENT_REGISTRY in (reason or "")

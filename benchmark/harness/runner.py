@@ -36,7 +36,7 @@ bootstrap.add_backend_to_path()
 from sqlalchemy import delete, func, select  # noqa: E402
 from sqlalchemy.orm import Session, selectinload, sessionmaker  # noqa: E402
 
-from app.db.enums import AuditStatus, SourceType  # noqa: E402
+from app.db.enums import AuditStatus, SourceType, VerificationStatus  # noqa: E402
 from app.db.models import (  # noqa: E402
     AgentRun,
     Audit,
@@ -192,10 +192,17 @@ def _load_findings(session: Session, audit_id: uuid.UUID) -> tuple[LoadedFinding
     The pairing is kept because the matching rule works on ``ReportedFinding``
     while the instrumentation needs the row it came from (id, origin, tool).
     ``order_findings`` returns the same objects, so identity maps back exactly.
+
+    A finding the validation pass rejected is not scored: the run is measuring
+    what the pipeline stands behind, so a claim the validator threw out must not
+    still count towards recall, precision or the false-positive rate.
     """
     rows = session.execute(
         select(Finding)
-        .where(Finding.audit_id == audit_id)
+        .where(
+            Finding.audit_id == audit_id,
+            Finding.verification_status != VerificationStatus.REJECTED_FALSE_POSITIVE,
+        )
         .options(selectinload(Finding.evidence))
         .order_by(Finding.category, Finding.id)
     ).scalars()

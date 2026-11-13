@@ -138,6 +138,7 @@ class AgentName(str, enum.Enum):
     ARCHITECTURE = "architecture"
     COMPLIANCE = "compliance"
     REPORTER = "reporter"
+    VALIDATOR = "validator"
 
 
 class AgentEventType(str, enum.Enum):

@@ -148,6 +148,25 @@ def render_scanner_warnings(evaluations) -> str:
     return "\n".join(("Scanner warnings (recall for these tools is not meaningful):", *lines))
 
 
+def _workers(block) -> list[tuple[str, dict]]:
+    """The per-agent mappings in a stage's outcome, descending one composition.
+
+    A crew stage reports ``{security: {...}, architecture: {...}}``. A composed
+    stage (``multi_agent_validated``) nests that under its own ``agents`` key and
+    adds scalars beside it, so the scalars and the composition are skipped and the
+    crews inside are what gets listed.
+    """
+    found: list[tuple[str, dict]] = []
+    for name, value in (block or {}).items():
+        if not isinstance(value, dict):
+            continue
+        if name == "agents":
+            found.extend(_workers(value))
+        else:
+            found.append((name, value))
+    return found
+
+
 def render_agent_summary(evaluations) -> str:
     """One line per repository that ran an agent stage."""
     lines: list[str] = []
@@ -169,7 +188,7 @@ def render_agent_summary(evaluations) -> str:
         if outcome.get("latency_ms"):
             line += f" {int(outcome['latency_ms']) / 1000:.0f}s"
         lines.append(line)
-        for name, agent in (outcome.get("agents") or {}).items():
+        for name, agent in _workers(outcome.get("agents")):
             lines.append(
                 f"    - {name}: calls={agent.get('calls')} accepted={agent.get('accepted')} "
                 f"rejected={agent.get('rejected')}"
@@ -178,6 +197,15 @@ def render_agent_summary(evaluations) -> str:
             )
             for note in agent.get("notes") or ():
                 lines.append(f"        . {note}")
+        validation = outcome.get("validation")
+        if isinstance(validation, dict):
+            lines.append(
+                f"    - validation: checked={validation.get('checked')} "
+                f"verified={validation.get('verified')} "
+                f"rejected={validation.get('rejected')} "
+                f"unresolved={validation.get('unresolved')} "
+                f"calls={validation.get('calls')} cost=${validation.get('cost_usd')}"
+            )
         # A composed stage prints each crew's notes under that crew, so the merged
         # list is only used when there is nothing to break it down into.
         for note in () if outcome.get("agents") else (outcome.get("notes") or ()):
