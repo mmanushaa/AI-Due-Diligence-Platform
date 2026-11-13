@@ -45,7 +45,7 @@ from app.agents.schema import (
     InvalidOutput,
     RejectedFinding,
     ValidationResult,
-    parse_report,
+    parse_crew_report,
     validate_report,
 )
 from app.agents.store import ensure_index, store_findings
@@ -423,7 +423,7 @@ def build_crew(
         attempts["review"] = attempts.get("review", 0) + 1
         attempt = attempts["review"]
         try:
-            report = parse_report(str(raw))
+            report = parse_crew_report(str(raw))
         except InvalidOutput:
             return _refused(
                 repository_tools,
@@ -531,7 +531,7 @@ def run_architecture_agent(
     logger.debug("architecture answer: %s", answer[:4_000])
 
     try:
-        report = parse_report(answer)
+        report = parse_crew_report(answer)
     except InvalidOutput as exc:
         logger.info("architecture answer unparseable for %s: %s", audit_id, exc)
         stored = _store_proved(session, audit_id, proved, repository_tools)

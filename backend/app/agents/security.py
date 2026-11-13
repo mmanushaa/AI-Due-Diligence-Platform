@@ -47,7 +47,13 @@ from app.agents.baseline_single import AgentOutcome
 from app.agents.crew import GatewayLLM, crew_llm, read_only_tools
 from app.agents.events import record_final_outputs, record_guardrail_failure
 from app.agents.prompts import fill, load_prompt
-from app.agents.schema import AgentFinding, InvalidOutput, parse_report, validate_report
+from app.agents.schema import (
+    AgentFinding,
+    InvalidOutput,
+    extract_json_object,
+    parse_crew_report,
+    validate_report,
+)
 from app.agents.store import ensure_index, store_findings
 from app.agents.tools import FindingView, RepositoryTools
 from app.db.enums import AgentName, Category
@@ -84,14 +90,12 @@ class TriageVerdict:
 
 
 def _parse_verdicts(raw: str) -> tuple[TriageVerdict, ...]:
-    """Read the triage task's JSON, tolerating prose around it."""
-    text = (raw or "").strip()
-    start, end = text.find("{"), text.rfind("}")
-    if start == -1 or end <= start:
-        return ()
+    """Read the triage task's JSON, tolerating a fence and prose around it."""
     try:
-        body = json.loads(text[start : end + 1])
-    except json.JSONDecodeError:
+        body = json.loads(extract_json_object(raw or ""))
+    except (InvalidOutput, ValueError):
+        return ()
+    if not isinstance(body, dict):
         return ()
     verdicts: list[TriageVerdict] = []
     for item in body.get("verdicts") or []:
@@ -175,7 +179,7 @@ def build_crew(
         attempts["investigation"] = attempts.get("investigation", 0) + 1
         attempt = attempts["investigation"]
         try:
-            parse_report(str(raw))
+            parse_crew_report(str(raw))
         except InvalidOutput:
             return _refused(
                 repository_tools,
@@ -207,12 +211,18 @@ def build_crew(
             )
         return True, output
 
-    triage = Task(
-        description=fill(prompt["triage"], findings=_finding_lines(findings) or "none"),
-        expected_output=prompt["triage_contract"],
-        agent=reviewer,
-        callback=forget_triage_calls,
-    )
+    tasks: list[Any] = []
+    if findings:
+        # Nothing to triage is nothing to ask: an empty findings list only
+        # invites the model to invent work, and it spends a call to do it.
+        tasks.append(
+            Task(
+                description=fill(prompt["triage"], findings=_finding_lines(findings)),
+                expected_output=prompt["triage_contract"],
+                agent=reviewer,
+                callback=forget_triage_calls,
+            )
+        )
     investigate = Task(
         description=prompt["investigation"],
         expected_output=prompt["json_contract"],
@@ -220,9 +230,10 @@ def build_crew(
         guardrail=read_before_answering,
         guardrail_max_retries=GUARDRAIL_RETRIES,
     )
+    tasks.append(investigate)
     return Crew(
         agents=[reviewer],
-        tasks=[triage, investigate],
+        tasks=tasks,
         process=Process.sequential,
         verbose=VERBOSE,
     )
@@ -299,8 +310,10 @@ def run_security_agent(
         )
 
     latency_ms = int((time.monotonic() - started) * 1000)
-    triage_raw = _task_output(result, 0)
-    investigation_raw = _task_output(result, 1)
+    # With nothing to triage the crew has one task, so the investigation answer
+    # is the first output rather than the second.
+    triage_raw = _task_output(result, 0) if findings else ""
+    investigation_raw = _task_output(result, 1 if findings else 0)
     record_final_outputs(
         session,
         audit_id,
@@ -321,7 +334,7 @@ def run_security_agent(
     accepted: tuple[AgentFinding, ...] = ()
     rejected = 0
     try:
-        report = parse_report(investigation_raw)
+        report = parse_crew_report(investigation_raw)
     except InvalidOutput as exc:
         logger.info("security crew answer unparseable for %s: %s", audit_id, exc)
         return SecurityOutcome(

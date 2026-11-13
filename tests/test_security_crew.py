@@ -35,7 +35,7 @@ from app.agents.security import (
     build_crew,
     run_security_agent,
 )
-from app.agents.tools import RepositoryTools
+from app.agents.tools import FindingView, RepositoryTools
 from app.core.config import Settings
 from app.db.enums import (
     AuditStatus,
@@ -105,17 +105,18 @@ class FakeCrew:
     investigation: str = '{"findings": []}'
     error: Exception | None = None
     seen: list = field(default_factory=list)
+    #: Whether the crew it stands in for was given anything to triage. The real
+    #: crew has one task when it was not, so this one returns one output.
+    triaged: bool = True
 
     def kickoff(self):
         """Answer as CrewAI would: one output per task, in order."""
         if self.error is not None:
             raise self.error
-        return SimpleNamespace(
-            tasks_output=[
-                SimpleNamespace(raw=self.triage),
-                SimpleNamespace(raw=self.investigation),
-            ]
-        )
+        outputs = [SimpleNamespace(raw=self.investigation)]
+        if self.triaged:
+            outputs.insert(0, SimpleNamespace(raw=self.triage))
+        return SimpleNamespace(tasks_output=outputs)
 
 
 def crew_factory_for(crew: FakeCrew):
@@ -123,6 +124,7 @@ def crew_factory_for(crew: FakeCrew):
 
     def factory(tools, llm, findings):
         crew.seen.append({"tools": tools, "llm": llm, "findings": findings})
+        crew.triaged = bool(findings)
         return crew
 
     return factory
@@ -131,6 +133,20 @@ def crew_factory_for(crew: FakeCrew):
 def reply(*findings: dict) -> str:
     """A model reply containing exactly these findings."""
     return json.dumps({"findings": list(findings)})
+
+
+def triaged_finding() -> FindingView:
+    """One stored finding, the shape the crew is handed to triage."""
+    return FindingView(
+        finding_id=uuid.uuid4(),
+        category="security",
+        severity="high",
+        title="Request handler reaches a row without an ownership check",
+        file_path="app/routes/orders.py",
+        line_start=6,
+        line_end=8,
+        snippet="    return get_order(conn, order_id)",
+    )
 
 
 def authz_finding(**overrides) -> dict:
@@ -578,7 +594,7 @@ def test_the_investigation_guardrail_refuses_an_answer_written_without_reading(a
     """A crew that answered from memory once answered with the scanner's own finding."""
     session = get_session_factory()()
     tools = RepositoryTools(session, audit)
-    crew = build_crew(tools, GatewayLLM(FakeClient(), agent=AGENT_ROLE), ())
+    crew = build_crew(tools, GatewayLLM(FakeClient(), agent=AGENT_ROLE), (triaged_finding(),))
     triage, investigate = crew.tasks
     try:
         passed, feedback = investigate.guardrail("{}")
@@ -602,10 +618,24 @@ def test_the_investigation_guardrail_refuses_an_answer_written_without_reading(a
         session.close()
 
 
-def test_the_crew_is_one_agent_with_two_sequential_tasks(audit):
+def test_the_triage_task_is_skipped_when_there_is_nothing_to_triage(audit):
+    """No scanner findings means no question, so no call is spent asking one."""
     session = get_session_factory()()
     tools = RepositoryTools(session, audit)
     crew = build_crew(tools, GatewayLLM(FakeClient(), agent=AGENT_ROLE), ())
+    prompt = load_prompt("security")
+    try:
+        assert len(crew.tasks) == 1
+        assert crew.tasks[0].description == prompt["investigation"]
+        assert crew.tasks[0].expected_output == prompt["json_contract"]
+    finally:
+        session.close()
+
+
+def test_the_crew_is_one_agent_with_two_sequential_tasks(audit):
+    session = get_session_factory()()
+    tools = RepositoryTools(session, audit)
+    crew = build_crew(tools, GatewayLLM(FakeClient(), agent=AGENT_ROLE), (triaged_finding(),))
     try:
         assert len(crew.agents) == 1
         assert [task.description for task in crew.tasks]  # both prompts rendered

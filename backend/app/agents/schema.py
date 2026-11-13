@@ -144,6 +144,68 @@ def parse_report(raw: str) -> AgentReport:
         raise InvalidOutput(_summarise(exc)) from exc
 
 
+def extract_json_object(raw: str) -> str:
+    """The first balanced top-level JSON object in a reply.
+
+    A crew answer is the contract's object, sometimes inside a ```json fence and
+    sometimes after a sentence of prose. Both are read here. Braces inside a JSON
+    string open and close nothing, so a quote holding a template literal cannot
+    end the object early.
+
+    Refused: no object at all, an object that never closes, and a second
+    top-level object. Two objects are refused rather than merged or guessed
+    between: the reply is ambiguous, and choosing one would score a coin toss.
+    """
+    text = raw or ""
+    start = text.find("{")
+    if start == -1:
+        raise InvalidOutput("reply contains no JSON object")
+    depth = 0
+    in_string = False
+    escaped = False
+    end = -1
+    for index in range(start, len(text)):
+        char = text[index]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+        elif char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                end = index
+                break
+    if end == -1:
+        raise InvalidOutput("reply contains no complete JSON object")
+    if "{" in text[end + 1 :]:
+        raise InvalidOutput("reply contains more than one JSON object")
+    return text[start : end + 1]
+
+
+def parse_crew_report(raw: str) -> AgentReport:
+    """A crew reply in the contract's schema, fenced or wrapped in prose.
+
+    The validation is the same one :func:`parse_report` applies: the same
+    :class:`AgentReport`, the same closed set of categories and severities, the
+    same refusal of extra keys. Only the wrapping is forgiven.
+    """
+    candidate = extract_json_object(raw)
+    try:
+        return AgentReport.model_validate_json(candidate)
+    except ValidationError as exc:
+        raise InvalidOutput(_summarise(exc)) from exc
+    except ValueError as exc:
+        raise InvalidOutput(f"reply is not valid JSON: {exc}") from exc
+
+
 def _summarise(exc: ValidationError) -> str:
     """Turn pydantic's errors into one sentence the model can act on."""
     parts: list[str] = []
