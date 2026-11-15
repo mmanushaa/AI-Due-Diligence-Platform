@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Due diligence report — {{ doc.audit.repository }}</title>
+  <style>
+    @page { size: A4; margin: 18mm 16mm; @bottom-right { content: counter(page) " / " counter(pages); font-size: 9pt; color: #6b7280; } }
+    body { font-family: "DejaVu Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: #111827; font-size: 11pt; line-height: 1.45; margin: 0; }
+    h1 { font-size: 22pt; margin: 0 0 4px; letter-spacing: -0.4px; }
+    h2 { font-size: 13pt; margin: 26px 0 8px; padding-bottom: 4px; border-bottom: 1px solid #e5e7eb; }
+    .muted { color: #6b7280; font-size: 9.5pt; }
+    .meta { display: flex; flex-wrap: wrap; gap: 6px 28px; margin: 10px 0 18px; font-size: 9.5pt; color: #374151; }
+    .meta b { color: #111827; }
+    .banner { border: 1px solid #b45309; background: #fffbeb; color: #92400e; padding: 10px 12px; border-radius: 6px; margin: 14px 0; font-size: 10pt; }
+    .risk { border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px 14px; background: #f9fafb; }
+    .risk .level { font-size: 18pt; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; }
+    .level-critical, .level-high { color: #b91c1c; }
+    .level-medium { color: #b45309; }
+    .level-low, .level-info { color: #047857; }
+    ul { margin: 6px 0 0 18px; padding: 0; }
+    li { margin: 3px 0; }
+    table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 9.5pt; }
+    th, td { text-align: left; border-bottom: 1px solid #e5e7eb; padding: 5px 6px; vertical-align: top; }
+    th { background: #f3f4f6; font-weight: 600; }
+    code { font-family: "DejaVu Sans Mono", ui-monospace, monospace; font-size: 9pt; background: #f3f4f6; padding: 1px 4px; border-radius: 3px; }
+    .sev { text-transform: uppercase; font-size: 8.5pt; font-weight: 700; letter-spacing: 0.4px; }
+    .sev-critical, .sev-high { color: #b91c1c; }
+    .sev-medium { color: #b45309; }
+    .sev-low, .sev-info { color: #047857; }
+    .cite { color: #6b7280; font-size: 8.5pt; }
+    .review { border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px 14px; }
+    .footer { margin-top: 28px; border-top: 1px solid #e5e7eb; padding-top: 8px; }
+    .empty { color: #6b7280; font-style: italic; }
+  </style>
+</head>
+<body>
+  <h1>Due diligence report</h1>
+  <p class="muted">{{ doc.audit.repository }} · audit <code>{{ doc.audit.audit_id }}</code></p>
+
+  <div class="meta">
+    <span>Status <b>{{ doc.audit.status }}</b></span>
+    <span>Started <b>{{ doc.audit.started_at or "—" }}</b></span>
+    <span>Finished <b>{{ doc.audit.finished_at or "—" }}</b></span>
+    <span>Cost <b>${{ doc.audit.spent_usd }}</b>{% if doc.audit.budget_usd %} of ${{ doc.audit.budget_usd }}{% endif %}</span>
+    <span>Findings <b>{{ doc.totals.values() | sum }}</b></span>
+  </div>
+
+  {% if doc.has_dropped_citations %}
+  <div class="banner">
+    <b>{{ doc.citations_dropped | length }} claim(s) were removed from the summary.</b>
+    Each cited a finding id that does not exist in this audit, so the sentence could not be
+    supported by the stored record.
+    <ul>
+      {% for dropped in doc.citations_dropped %}
+      <li>{{ dropped.text }} <span class="cite">(unknown id(s): {{ dropped.unknown_ids | join(", ") }})</span></li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+
+  <h2>Executive summary</h2>
+  {% if doc.claims %}
+  <ul>
+    {% for claim in doc.claims %}
+    <li>{{ claim.text }} <span class="cite">[{{ claim.finding_ids | join(", ") }}]</span></li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="empty">No cited summary claims: the audit recorded nothing that could be supported by a finding.</p>
+  {% endif %}
+
+  <h2>Overall risk</h2>
+  {% if doc.risk %}
+  <div class="risk">
+    <div class="level level-{{ doc.risk.level }}">{{ doc.risk.level }}</div>
+    <p class="muted">
+      Set by the rule <code>{{ doc.risk.rule }}</code>{% if doc.risk.score is not none %} · score {{ "%.2f" | format(doc.risk.score) }}{% endif %}
+      {% if doc.risk.supersedes_id %} · this assessment supersedes <code>{{ doc.risk.supersedes_id }}</code>{% endif %}
+    </p>
+    {% if doc.risk.rationale %}<p>{{ doc.risk.rationale }}</p>{% endif %}
+  </div>
+  {% else %}
+  <p class="empty">No risk assessment was recorded for this audit.</p>
+  {% endif %}
+
+  <h2>Top findings</h2>
+  {% if doc.top_findings %}
+  <table>
+    <thead><tr><th>Severity</th><th>Finding</th><th>Location</th><th>Status</th><th>Id</th></tr></thead>
+    <tbody>
+      {% for finding in doc.top_findings %}
+      <tr>
+        <td class="sev sev-{{ finding.severity }}">{{ finding.severity }}</td>
+        <td>{{ finding.title }}</td>
+        <td>{% if finding.file_path %}<code>{{ finding.file_path }}{% if finding.line_start %}:{{ finding.line_start }}{% endif %}</code>{% else %}—{% endif %}</td>
+        <td>{{ finding.status }}</td>
+        <td class="cite">{{ finding.id }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="empty">No findings to rank.</p>
+  {% endif %}
+
+  <h2>Category breakdown</h2>
+  {% if doc.categories %}
+  <table>
+    <thead><tr><th>Category</th><th>Critical</th><th>High</th><th>Medium</th><th>Low</th><th>Info</th><th>Total</th></tr></thead>
+    <tbody>
+      {% for row in doc.categories %}
+      <tr>
+        <td>{{ row.category }}</td>
+        {% for name in ["critical", "high", "medium", "low", "info"] %}
+        <td>{{ row.counts.get(name, 0) or "" }}</td>
+        {% endfor %}
+        <td><b>{{ row.total }}</b></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="empty">No findings were categorised.</p>
+  {% endif %}
+
+  <h2>Remediation priorities</h2>
+  {% if doc.priorities %}
+  <ol>
+    {% for finding in doc.priorities %}
+    <li>
+      <b>{{ finding.title }}</b>
+      <span class="sev sev-{{ finding.severity }}">{{ finding.severity }}</span>
+      {% if finding.file_path %}in <code>{{ finding.file_path }}{% if finding.line_start %}:{{ finding.line_start }}{% endif %}</code>{% endif %}
+      {% if finding.recommendation %}<br /><span class="muted">{{ finding.recommendation }}</span>{% endif %}
+      <span class="cite">[{{ finding.id }}]</span>
+    </li>
+    {% endfor %}
+  </ol>
+  {% else %}
+  <p class="empty">Nothing to remediate.</p>
+  {% endif %}
+
+  <h2>Limitations</h2>
+  <ul>
+    {% for line in doc.limitations %}<li>{{ line }}</li>{% endfor %}
+  </ul>
+
+  {% if doc.review %}
+  <h2>Reviewer decision</h2>
+  <div class="review">
+    <p><b>{{ doc.review.decision | replace("_", " ") }}</b>
+      {% if doc.review.reviewer %} by {{ doc.review.reviewer }}{% endif %}
+      <span class="muted">on {{ doc.review.decided_at }}</span></p>
+    {% if doc.review.original_level or doc.review.final_level %}
+    <p class="muted">Risk level: {{ doc.review.original_level or "—" }} → {{ doc.review.final_level or "—" }}</p>
+    {% endif %}
+    {% if doc.review.reason %}<p>{{ doc.review.reason }}</p>{% endif %}
+  </div>
+  {% endif %}
+
+  <p class="footer muted">
+    Generated {{ doc.generated_at }} from stored findings, the risk assessment and review
+    decisions only. Every summary claim cites the finding ids that support it.
+  </p>
+</body>
+</html>

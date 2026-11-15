@@ -467,7 +467,7 @@ def test_the_shared_adapter_still_drops_the_strict_flag():
     ] == "c1"
 
 
-def test_the_composed_stage_adds_both_crews_outcomes_up():
+def test_the_composed_stage_adds_every_crews_outcome_up():
     session = get_session_factory()()
     try:
         outcome = run_multi_agent(session, uuid.uuid4())  # no such audit: both crews say so
@@ -475,9 +475,12 @@ def test_the_composed_stage_adds_both_crews_outcomes_up():
         session.close()
 
     described = outcome.as_dict()
-    assert set(described["agents"]) == {"security", "architecture"}
+    assert set(described["agents"]) == {"security", "architecture", "compliance"}
     assert described["calls"] == outcome.calls
-    assert all(error.startswith(("security:", "architecture:")) for error in described["errors"])
+    assert all(
+        error.startswith(("security:", "architecture:", "compliance:"))
+        for error in described["errors"]
+    )
 
 
 def _client_for(session, audit_id):

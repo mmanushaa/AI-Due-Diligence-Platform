@@ -2,7 +2,8 @@ import { useState } from "react";
 import UploadPage from "./pages/UploadPage";
 import StatusPage from "./pages/StatusPage";
 import FindingsPage from "./pages/Findings";
-import type { UploadedRepository } from "./lib/api";
+import LoginForm from "./components/LoginForm";
+import { getToken, logout, type SessionUser, type UploadedRepository } from "./lib/api";
 
 type View = "upload" | "status" | "findings";
 
@@ -10,6 +11,22 @@ function App() {
   const [view, setView] = useState<View>("upload");
   const [repo, setRepo] = useState<UploadedRepository | null>(null);
   const [auditId, setAuditId] = useState<string | null>(null);
+  // Every endpoint needs a bearer token since step 3.6, so the app starts signed out.
+  const [user, setUser] = useState<SessionUser | null>(null);
+  const [signedIn, setSignedIn] = useState(() => getToken() !== null);
+
+  if (!signedIn) {
+    return (
+      <div className="app">
+        <LoginForm
+          onSignedIn={(next) => {
+            setUser(next);
+            setSignedIn(true);
+          }}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="app">
@@ -35,6 +52,17 @@ function App() {
             disabled={!auditId}
           >
             Findings
+          </button>
+          <button
+            className="nav-btn"
+            onClick={() => {
+              logout();
+              setUser(null);
+              setSignedIn(false);
+            }}
+            title={user ? `${user.email} (${user.role})` : "sign out"}
+          >
+            Sign out
           </button>
         </div>
       </nav>

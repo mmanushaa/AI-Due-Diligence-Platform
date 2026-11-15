@@ -83,6 +83,77 @@ export interface FindingDetail {
 
 const BASE = "";
 
+const TOKEN_KEY = "dd.access_token";
+
+/** The access token lives in memory by day and in localStorage by night.
+ *  The refresh token is an HttpOnly cookie the browser sends to /auth/refresh;
+ *  JavaScript never sees it. */
+export function getToken(): string | null {
+  return window.localStorage.getItem(TOKEN_KEY);
+}
+
+export function setToken(token: string | null): void {
+  if (token) window.localStorage.setItem(TOKEN_KEY, token);
+  else window.localStorage.removeItem(TOKEN_KEY);
+}
+
+function authHeaders(): Record<string, string> {
+  const token = getToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+export interface SessionUser {
+  id: string;
+  email: string;
+  role: "analyst" | "reviewer" | "admin";
+}
+
+export interface LoginResult {
+  access_token: string;
+  token_type: string;
+  expires_in: number;
+  user: SessionUser;
+}
+
+export async function login(email: string, password: string): Promise<LoginResult> {
+  const res = await fetch(`${BASE}/api/v1/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password }),
+  });
+  if (res.status === 401) throw new Error("Invalid email or password");
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const result = (await res.json()) as LoginResult;
+  setToken(result.access_token);
+  return result;
+}
+
+export function logout(): void {
+  setToken(null);
+  void fetch(`${BASE}/api/v1/auth/logout`, { method: "POST", credentials: "include" });
+}
+
+/** One audit's live progress. Mirrors app/progress.py on the server. */
+export interface ProgressSnapshot {
+  type: "progress";
+  audit_id: string;
+  status: string;
+  current_stage: string | null;
+  stages: Record<string, StageState>;
+  elapsed_ms: number;
+  cost_usd: number;
+  final: boolean;
+  at: string;
+}
+
+export type StageState = "pending" | "running" | "done" | "failed" | "skipped";
+
+/** EventSource cannot send headers, so the access token rides in the query. */
+export function progressEventsUrl(auditId: string | number): string {
+  const token = getToken() ?? "";
+  return `${BASE}/api/v1/audits/${auditId}/events?token=${encodeURIComponent(token)}`;
+}
+
 function json<T>(res: Response): Promise<T> {
   if (!res.ok) {
     const text = res.statusText;
@@ -96,6 +167,7 @@ export async function uploadRepository(
 ): Promise<UploadedRepository> {
   const res = await fetch(`${BASE}/api/v1/repositories`, {
     method: "POST",
+    headers: authHeaders(),
     body: form,
   });
   return json<UploadedRepository>(res);
@@ -106,6 +178,7 @@ export async function startAudit(
 ): Promise<AuditOut> {
   const res = await fetch(`${BASE}/api/v1/repositories/${repoId}/audits`, {
     method: "POST",
+    headers: authHeaders(),
   });
   if (!res.ok) {
     if (res.status === 404) {
@@ -119,7 +192,7 @@ export async function startAudit(
 export async function getAudit(
   auditId: string | number
 ): Promise<AuditOut> {
-  const res = await fetch(`${BASE}/api/v1/audits/${auditId}`);
+  const res = await fetch(`${BASE}/api/v1/audits/${auditId}`, { headers: authHeaders() });
   if (!res.ok) {
     throw new Error(`HTTP ${res.status}`);
   }
@@ -142,7 +215,9 @@ export async function getFindings(
   if (filters?.file) params.set("file", filters.file);
 
   const qs = params.size ? `?${params.toString()}` : "";
-  const res = await fetch(`${BASE}/api/v1/audits/${auditId}/findings${qs}`);
+  const res = await fetch(`${BASE}/api/v1/audits/${auditId}/findings${qs}`, {
+    headers: authHeaders(),
+  });
   if (!res.ok) {
     throw new Error(`HTTP ${res.status}`);
   }
@@ -152,7 +227,9 @@ export async function getFindings(
 export async function getFinding(
   findingId: string
 ): Promise<FindingDetail> {
-  const res = await fetch(`${BASE}/api/v1/findings/${findingId}`);
+  const res = await fetch(`${BASE}/api/v1/findings/${findingId}`, {
+    headers: authHeaders(),
+  });
   if (!res.ok) {
     throw new Error(`HTTP ${res.status}`);
   }
@@ -160,7 +237,9 @@ export async function getFinding(
 }
 
 export async function getReportHtml(auditId: string | number): Promise<string> {
-  const res = await fetch(`${BASE}/api/v1/audits/${auditId}/report`);
+  const res = await fetch(`${BASE}/api/v1/audits/${auditId}/report`, {
+    headers: authHeaders(),
+  });
   if (!res.ok) {
     throw new Error(`HTTP ${res.status}`);
   }

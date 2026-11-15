@@ -155,7 +155,10 @@ def test_broker_failure_marks_the_audit_failed(client, repository, monkeypatch):
         assert audit.finished_at is not None
 
         log = session.execute(
-            select(AuditLog).where(AuditLog.object_id == str(audit.id))
+            select(AuditLog).where(
+                AuditLog.object_id == str(audit.id),
+                AuditLog.action == "audit_failed",
+            )
         ).scalars().one()
         assert log.action == "audit_failed"
         assert "could not enqueue" in log.after["reason"]
@@ -206,7 +209,10 @@ def test_a_missing_snapshot_fails_the_audit_with_the_reason(tmp_path):
 
         with get_session_factory()() as session:
             log = session.execute(
-                select(AuditLog).where(AuditLog.object_id == str(audit_id))
+                select(AuditLog).where(
+                    AuditLog.object_id == str(audit_id),
+                    AuditLog.action == "audit_failed",
+                )
             ).scalars().one()
             assert log.action == "audit_failed"
             assert "snapshot" in log.after["reason"]

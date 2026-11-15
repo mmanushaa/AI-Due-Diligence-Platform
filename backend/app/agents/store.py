@@ -118,7 +118,7 @@ def store_findings(
             origin=FindingOrigin.AGENT,
             source_tool=source_tool,
             verification_status=VerificationStatus.AI_SUGGESTED,
-            verdict=Verdict.ISSUE,
+            verdict=Verdict(finding.verdict),
             reasoning=finding.reasoning,
             recommendation=finding.recommendation,
             fingerprint=fingerprint,

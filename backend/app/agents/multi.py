@@ -9,7 +9,9 @@ adds their numbers up.
 The order follows the cost: the security crew is the expensive one and its findings
 are why the configuration exists. The architecture crew's facts cost no model calls
 at all, so a budget that runs out on the security crew still leaves the graph's
-cycles reportable after it.
+cycles reportable after it. The compliance crew (step 3.1) runs last: it reads the
+scanners' licence and advisory rows, so it is cheap and it has nothing to retrieve
+that the first two crews have not already touched.
 """
 
 from __future__ import annotations
@@ -23,6 +25,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.agents.architecture import ArchitectureOutcome, run_architecture_agent
+from app.agents.compliance import ComplianceOutcome, run_compliance_agent
 from app.agents.security import SecurityOutcome, run_security_agent
 
 logger = logging.getLogger(__name__)
@@ -36,25 +39,32 @@ class MultiAgentOutcome:
 
     security: SecurityOutcome = field(default_factory=SecurityOutcome)
     architecture: ArchitectureOutcome = field(default_factory=ArchitectureOutcome)
+    compliance: ComplianceOutcome = field(default_factory=ComplianceOutcome)
 
     @property
     def calls(self) -> int:
-        return self.security.calls + self.architecture.calls
+        return self.security.calls + self.architecture.calls + self.compliance.calls
 
     @property
     def accepted(self) -> int:
-        return self.security.accepted + self.architecture.accepted
+        return self.security.accepted + self.architecture.accepted + self.compliance.accepted
 
     @property
     def cost_usd(self) -> Decimal:
-        return self.security.cost_usd + self.architecture.cost_usd
+        return (
+            self.security.cost_usd + self.architecture.cost_usd + self.compliance.cost_usd
+        )
 
     @property
     def errors(self) -> tuple[str, ...]:
         """Every failure, labelled with the crew that had it."""
         return tuple(
             f"{name}: {error}"
-            for name, outcome in (("security", self.security), ("architecture", self.architecture))
+            for name, outcome in (
+                ("security", self.security),
+                ("architecture", self.architecture),
+                ("compliance", self.compliance),
+            )
             for error in outcome.errors
         )
 
@@ -65,22 +75,32 @@ class MultiAgentOutcome:
             "model": self.security.model or self.architecture.model,
             "calls": self.calls,
             "accepted": self.accepted,
-            "rejected": self.security.rejected + self.architecture.rejected,
-            "dropped": self.security.dropped + self.architecture.dropped,
+            "rejected": (
+                self.security.rejected
+                + self.architecture.rejected
+                + self.compliance.rejected
+            ),
+            "dropped": self.security.dropped + self.architecture.dropped + self.compliance.dropped,
             "cost_usd": str(self.cost_usd),
-            "latency_ms": self.security.latency_ms + self.architecture.latency_ms,
+            "latency_ms": (
+                self.security.latency_ms
+                + self.architecture.latency_ms
+                + self.compliance.latency_ms
+            ),
             "errors": list(self.errors),
             "notes": [
                 f"{name}: {note}"
                 for name, outcome in (
                     ("security", self.security),
                     ("architecture", self.architecture),
+                    ("compliance", self.compliance),
                 )
                 for note in outcome.notes
             ],
             "agents": {
                 "security": self.security.as_dict(),
                 "architecture": self.architecture.as_dict(),
+                "compliance": self.compliance.as_dict(),
             },
         }
 
@@ -89,11 +109,16 @@ def run_multi_agent(session: Session, audit_id: uuid.UUID) -> MultiAgentOutcome:
     """Run every crew over one audit, in order, and report them together."""
     security = run_security_agent(session, audit_id)
     architecture = run_architecture_agent(session, audit_id)
+    compliance = run_compliance_agent(session, audit_id)
     logger.info(
-        "multi-agent stage for audit %s: security %d stored, architecture %d stored, %d calls",
+        "multi-agent stage for audit %s: security %d stored, architecture %d stored,"
+        " compliance %d stored, %d calls",
         audit_id,
         security.accepted,
         architecture.accepted,
-        security.calls + architecture.calls,
+        compliance.accepted,
+        security.calls + architecture.calls + compliance.calls,
     )
-    return MultiAgentOutcome(security=security, architecture=architecture)
+    return MultiAgentOutcome(
+        security=security, architecture=architecture, compliance=compliance
+    )

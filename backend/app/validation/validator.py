@@ -34,6 +34,7 @@ from typing import TYPE_CHECKING, Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
+from app.core.audit import record
 from app.db.enums import (
     AgentName,
     FindingOrigin,
@@ -289,6 +290,15 @@ def validate_audit(
         if status is previous:
             continue
         finding.verification_status = status
+        record(
+            session,
+            actor=ACTOR,
+            action="finding_status_changed",
+            object_type="finding",
+            object_id=finding.id,
+            before={"status": previous.value},
+            after={"status": status.value, "reason": reason[:400]},
+        )
         session.add(
             FindingEvent(
                 finding_id=finding.id,

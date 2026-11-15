@@ -7,7 +7,8 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, s
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 
-from app.core.deps import get_current_user
+from app.core.deps import require_roles
+from app.db.enums import UserRole
 from app.db.models import Repository, User
 from app.db.session import get_session
 from app.intake.errors import IntakeError
@@ -42,7 +43,7 @@ class RepositoryCreated(RepositoryOut):
 async def create_repository(
     file: UploadFile = File(..., description="zip archive of the repository"),
     name: str | None = Form(default=None),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_roles(UserRole.ANALYST)),
     session: Session = Depends(get_session),
 ) -> RepositoryCreated:
     """Accept a zip upload, extract it safely and record the snapshot."""

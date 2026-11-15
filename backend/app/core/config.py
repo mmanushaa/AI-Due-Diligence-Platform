@@ -12,6 +12,23 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg://postgres:postgres@localhost:5432/due_diligence"
     redis_url: str = "redis://localhost:6379/0"
 
+    # Authentication (step 3.6). JWT_SECRET signs every token; the default is for a
+    # local checkout only and every real environment must set its own long random
+    # value. COOKIE_SECURE must be true anywhere the browser reaches the API over
+    # HTTPS, or the refresh cookie would travel in clear text.
+    jwt_secret: SecretStr = SecretStr("dev-only-change-me-32-bytes-minimum-0001")
+    jwt_algorithm: str = "HS256"
+    jwt_expire_minutes: int = 60
+    jwt_refresh_days: int = 14
+    cookie_secure: bool = False
+
+    # Observability (step 3.8). Langfuse traces are optional: with no host and keys
+    # every tracing call is a no-op. The keys are the project's public/secret key
+    # pair, not the Langfuse user password.
+    langfuse_host: str | None = None
+    langfuse_public_key: SecretStr | None = None
+    langfuse_secret_key: SecretStr | None = None
+
     # Celery (step 1.9). Both default to REDIS_URL when unset.
     celery_broker_url: str | None = None
     celery_result_backend: str | None = None

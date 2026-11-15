@@ -392,6 +392,18 @@ class Report(IdMixin, CreatedAtMixin, Base):
     )
 
 
+class ScannerFailure(IdMixin, CreatedAtMixin, Base):
+    """A scanner that did not finish for an audit (step 3.9 reports the gap)."""
+
+    __tablename__ = "scanner_failures"
+
+    audit_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("audits.id", ondelete="CASCADE"), nullable=False
+    )
+    tool: Mapped[str] = mapped_column(Text, nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+
+
 class AuditLog(IdMixin, CreatedAtMixin, Base):
     """Append-only: no update or delete triggers yet (step 3.5)."""
 

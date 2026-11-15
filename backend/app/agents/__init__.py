@@ -11,7 +11,8 @@ stopped being the only single-agent configuration): one call over a context a
 deterministic plan chose. ``single_agent_tools`` is the same single agent with the
 crews' three tools and limits, covering security, architecture and license in one
 task. ``multi_agent`` is the crew of agents (step 2.8's security reviewer, step
-2.9's architecture reviewer), each with its own model calls and outcome.
+2.9's architecture reviewer, step 3.1's compliance reviewer), each with its own
+model calls and outcome.
 ``scanners_plus_deterministic`` runs the module graph's cycle walk and no model at
 all. ``multi_agent_validated`` joins this mapping when its verification pass lands.
 """
@@ -26,6 +27,7 @@ from sqlalchemy.orm import Session
 
 from app.agents.architecture import ArchitectureOutcome, run_architecture_agent
 from app.agents.baseline_single import AgentOutcome, run_baseline_single
+from app.agents.compliance import ComplianceOutcome, run_compliance_agent
 from app.agents.deterministic import DeterministicOutcome, run_deterministic_graph
 from app.agents.multi import MultiAgentOutcome, run_multi_agent
 from app.agents.security import SecurityOutcome, run_security_agent
@@ -52,6 +54,7 @@ __all__ = [
     "AgentOutcome",
     "AgentStage",
     "ArchitectureOutcome",
+    "ComplianceOutcome",
     "DeterministicOutcome",
     "MultiAgentOutcome",
     "SecurityOutcome",
@@ -59,6 +62,7 @@ __all__ = [
     "ValidatedOutcome",
     "run_architecture_agent",
     "run_baseline_single",
+    "run_compliance_agent",
     "run_deterministic_graph",
     "run_multi_agent",
     "run_multi_agent_validated",

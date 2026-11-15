@@ -11,7 +11,7 @@ import zipfile
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import delete
+from sqlalchemy import delete, text
 
 from app.core.config import settings
 from app.db.models import Repository
@@ -68,7 +68,12 @@ def client(tmp_path, monkeypatch):
 
 def _purge_pytest_repositories() -> None:
     with get_session_factory()() as session:
+        # Deleting a repository cascades into its audits and their reviews, and since
+        # step 3.5 review_decisions refuses deletes; this cleanup needs the trigger off.
+        session.execute(text("ALTER TABLE review_decisions DISABLE TRIGGER USER"))
         session.execute(delete(Repository).where(Repository.name.like("pytest-%")))
+        session.commit()
+        session.execute(text("ALTER TABLE review_decisions ENABLE TRIGGER USER"))
         session.commit()
 
 

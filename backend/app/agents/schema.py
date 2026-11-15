@@ -65,6 +65,9 @@ class AgentFinding(BaseModel):
     line_end: int = Field(ge=1)
     severity: Literal["critical", "high", "medium", "low", "info"]
     confidence: float = Field(ge=0.0, le=1.0)
+    #: Most stages only report problems, so the default is what they always meant.
+    #: A compliance answer can also clear a licence or say the data cannot decide.
+    verdict: Literal["issue", "no_issue", "insufficient_evidence"] = "issue"
     reasoning: str = Field(min_length=1, max_length=MAX_TEXT)
     recommendation: str | None = Field(default=None, max_length=MAX_TEXT)
     evidence_quote: str | None = Field(default=None, max_length=MAX_TEXT)

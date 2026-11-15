@@ -66,6 +66,9 @@ services:
       # The gateway's in-network address, not the host-side LITELLM_BASE_URL.
       LITELLM_BASE_URL: http://litellm:4000
       LITELLM_API_KEY: ${LITELLM_API_KEY:-sk-local-dev}
+      LANGFUSE_HOST: ${LANGFUSE_HOST:-http://langfuse:3000}
+      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-pk-lf-local-dev}
+      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-sk-lf-local-dev}
       LLM_DEFAULT_MODEL: ${LLM_DEFAULT_MODEL:-gpt-4o-mini}
       LLM_TRIAGE_MODEL: ${LLM_TRIAGE_MODEL:-gpt-4o-mini}
       LLM_FALLBACK_MODEL: ${LLM_FALLBACK_MODEL:-gpt-4o}
@@ -95,6 +98,9 @@ services:
       # Agent calls go through the gateway, as in the api service.
       LITELLM_BASE_URL: http://litellm:4000
       LITELLM_API_KEY: ${LITELLM_API_KEY:-sk-local-dev}
+      LANGFUSE_HOST: ${LANGFUSE_HOST:-http://langfuse:3000}
+      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-pk-lf-local-dev}
+      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-sk-lf-local-dev}
       LLM_DEFAULT_MODEL: ${LLM_DEFAULT_MODEL:-gpt-4o-mini}
       LLM_TRIAGE_MODEL: ${LLM_TRIAGE_MODEL:-gpt-4o-mini}
       LLM_FALLBACK_MODEL: ${LLM_FALLBACK_MODEL:-gpt-4o}
@@ -124,5 +130,120 @@ services:
     depends_on:
       - api
 
+  # Langfuse (step 3.8). Self-hosted tracing: one trace per audit, one generation per
+  # model call. Langfuse v2 needs its own Postgres, ClickHouse for trace storage and
+  # an S3-compatible bucket for the event payloads, plus the Redis above.
+  langfuse-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${LANGFUSE_DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${LANGFUSE_DB_PASSWORD:-postgres}
+      POSTGRES_DB: ${LANGFUSE_DB_NAME:-langfuse}
+    volumes:
+      - langfuse_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${LANGFUSE_DB_USER:-postgres} -d ${LANGFUSE_DB_NAME:-langfuse}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.3
+    environment:
+      CLICKHOUSE_DB: default
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-clickhouse}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-clickhouse}
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:8123/ping || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # S3-compatible bucket for Langfuse's event payloads. This is rclone's S3 server
+  # rather than MinIO because the MinIO images are not reliably pullable; Langfuse
+  # only needs an S3 API with path-style addressing, and this provides one.
+  s3:
+    image: rclone/rclone:latest
+    command: ["serve", "s3", "/data", "--addr", ":9000", "--auth-key", "${MINIO_ROOT_USER:-minio},${MINIO_ROOT_PASSWORD:-miniosecret}"]
+    volumes:
+      - langfuse_s3:/data
+    ports:
+      - "9000:9000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:9000/ || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # A bucket for rclone is a directory, so create it once before Langfuse starts.
+  s3-init:
+    image: alpine:3.20
+    command: ["sh", "-c", "mkdir -p /data/langfuse && chmod 777 /data/langfuse"]
+    volumes:
+      - langfuse_s3:/data
+
+  langfuse:
+    image: langfuse/langfuse:2
+    depends_on:
+      langfuse-db:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+      s3-init:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: postgresql://${LANGFUSE_DB_USER:-postgres}:${LANGFUSE_DB_PASSWORD:-postgres}@langfuse-db:5432/${LANGFUSE_DB_NAME:-langfuse}
+      NEXTAUTH_URL: ${LANGFUSE_HOST:-http://localhost:3000}
+      NEXTAUTH_SECRET: ${LANGFUSE_NEXTAUTH_SECRET:-local-dev-nextauth-secret-change-me}
+      SALT: ${LANGFUSE_SALT:-local-dev-salt-change-me}
+      # 32 bytes of hex. Rotating it makes previously stored provider credentials
+      # unreadable; this value is for a local stack only.
+      ENCRYPTION_KEY: ${LANGFUSE_ENCRYPTION_KEY:-0000000000000000000000000000000000000000000000000000000000000000}
+      TELEMETRY_ENABLED: "false"
+      CLICKHOUSE_URL: http://clickhouse:8123
+      # Migrations use the native protocol on 9000; queries use HTTP on 8123.
+      CLICKHOUSE_MIGRATION_URL: clickhouse://clickhouse:9000
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-clickhouse}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-clickhouse}
+      CLICKHOUSE_DB: default
+      REDIS_CONNECTION_STRING: redis://redis:6379/1
+      LANGFUSE_S3_EVENT_UPLOAD_BUCKET: langfuse
+      LANGFUSE_S3_EVENT_UPLOAD_REGION: auto
+      LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minio}
+      LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-miniosecret}
+      LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT: http://s3:9000
+      LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE: "true"
+      # Seeded account and project API keys, so a fresh stack is usable without
+      # clicking through the setup wizard. Local development credentials only.
+      LANGFUSE_INIT_ORG_ID: due-diligence
+      LANGFUSE_INIT_ORG_NAME: Due Diligence
+      LANGFUSE_INIT_PROJECT_ID: due-diligence
+      LANGFUSE_INIT_PROJECT_NAME: Due Diligence
+      LANGFUSE_INIT_PROJECT_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-pk-lf-local-dev}
+      LANGFUSE_INIT_PROJECT_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-sk-lf-local-dev}
+      LANGFUSE_INIT_USER_EMAIL: ${LANGFUSE_ADMIN_EMAIL:-admin@example.local}
+      LANGFUSE_INIT_USER_NAME: Langfuse Admin
+      LANGFUSE_INIT_USER_PASSWORD: ${LANGFUSE_ADMIN_PASSWORD:-langfuse-local-dev}
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:3000/api/public/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
+
 volumes:
   postgres_data:
+  langfuse_data:
+  clickhouse_data:
+  langfuse_s3:

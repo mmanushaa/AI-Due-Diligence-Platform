@@ -1,7 +1,6 @@
-import { useEffect, useRef, useState } from "react";
-import { getAudit, startAudit, type AuditOut } from "../lib/api";
-
-const POLL_MS = 2000;
+import { useState } from "react";
+import StageTracker from "../components/StageTracker";
+import { startAudit, type AuditOut, type ProgressSnapshot } from "../lib/api";
 
 export default function StatusPage({
   repositoryId,
@@ -13,26 +12,9 @@ export default function StatusPage({
   const [audit, setAudit] = useState<AuditOut | null>(null);
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const timer = useRef<number | null>(null);
 
-  const active = audit !== null && (audit.status === "queued" || audit.status === "running");
-
-  useEffect(() => {
-    if (!active || !audit) return;
-
-    timer.current = window.setTimeout(async () => {
-      try {
-        const next = await getAudit(audit.id);
-        setAudit(next);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
-      }
-    }, POLL_MS);
-
-    return () => {
-      if (timer.current !== null) window.clearTimeout(timer.current);
-    };
-  }, [active, audit]);
+  const active =
+    audit !== null && (audit.status === "queued" || audit.status === "running");
 
   const handleStart = async () => {
     if (!repositoryId) return;
@@ -47,6 +29,23 @@ export default function StatusPage({
     } finally {
       setStarting(false);
     }
+  };
+
+  // The tracker is the source of truth once it is connected: the card below follows
+  // the same events the stage list does, so there is no second polling path.
+  const handleProgress = (snapshot: ProgressSnapshot) => {
+    setAudit((current) =>
+      current
+        ? {
+            ...current,
+            status: snapshot.status,
+            current_stage: snapshot.current_stage,
+            finished_at: snapshot.final
+              ? (current.finished_at ?? snapshot.at)
+              : current.finished_at,
+          }
+        : current
+    );
   };
 
   return (
@@ -96,6 +95,8 @@ export default function StatusPage({
           )}
         </dl>
       )}
+
+      {audit && <StageTracker auditId={String(audit.id)} onProgress={handleProgress} />}
 
       {audit && !active && (
         <p className="muted">

@@ -38,6 +38,7 @@ from sqlalchemy.orm import Session
 from app.core.config import Settings, settings as default_settings
 from app.db.enums import AgentName
 from app.db.models import AgentRun, Audit
+from app.observability.tracing import Tracer, get_tracer, trace_id_for
 
 # `cost_usd` is numeric(10,4), so this is the smallest amount the column can
 # hold; anything finer is rounded rather than silently truncated.
@@ -309,11 +310,13 @@ class LLMClient:
         provider: ChatProvider | None = None,
         settings: Settings | None = None,
         sleep: Callable[[float], None] = time.sleep,
+        tracer: Tracer | None = None,
     ) -> None:
         self.session = session
         self.audit_id = audit_id
         self.settings = settings or default_settings
         self.provider = provider or get_provider(self.settings)
+        self.tracer = tracer or get_tracer()
         # Injected so retry tests do not actually wait.
         self._sleep = sleep
 
@@ -407,6 +410,7 @@ class LLMClient:
                         model=candidate,
                         status=STATUS_FAILED,
                         latency_ms=latency_ms,
+                        error=str(exc)[:500],
                     )
                     last_error = exc
                     if not exc.retryable:
@@ -487,8 +491,14 @@ class LLMClient:
         output_tokens: int | None = None,
         cost: Decimal | None = None,
         latency_ms: int | None = None,
+        error: str | None = None,
     ) -> AgentRun:
-        """Write the agent_runs row and keep audits.cost_usd in step with it."""
+        """Write the agent_runs row, its trace id, and keep audits.cost_usd in step.
+
+        The row and the Langfuse generation carry the same trace id, so a stored call
+        can be followed to its span and back.
+        """
+        trace_id = trace_id_for(self.audit_id)
         run = AgentRun(
             audit_id=self.audit_id,
             agent=agent,
@@ -498,6 +508,19 @@ class LLMClient:
             cost_usd=cost,
             latency_ms=latency_ms,
             status=status,
+            trace_id=trace_id,
+        )
+        self.tracer.generation(
+            audit_id=self.audit_id,
+            agent=agent.value,
+            model=model,
+            status=status,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cost_usd=cost,
+            latency_ms=latency_ms,
+            error=error,
+            metadata={"summary": f"{agent.value} -> {model}"},
         )
         self.session.add(run)
         self.session.flush()

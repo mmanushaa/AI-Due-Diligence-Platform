@@ -427,6 +427,10 @@ def test_the_validated_stage_still_reports_the_planted_export_issue(
     monkeypatch.setattr("app.agents.security.LLMClient", SilentClient)
     monkeypatch.setattr("app.agents.architecture.build_crew", lambda *a, **k: ScriptedCrew())
     monkeypatch.setattr("app.agents.architecture.LLMClient", SilentClient)
+    # The compliance crew runs in the same stage (step 3.1); it reports nothing here,
+    # and its own behaviour is covered by tests/test_compliance_agent.py.
+    monkeypatch.setattr("app.agents.compliance.build_crew", lambda *a, **k: ScriptedCrew())
+    monkeypatch.setattr("app.agents.compliance.LLMClient", SilentClient)
     monkeypatch.setattr("app.validation.validator.LLMClient", AffirmingClient)
 
     session = get_session_factory()()
@@ -445,6 +449,11 @@ def test_the_validated_stage_still_reports_the_planted_export_issue(
             for row in stored
             for evidence in row.evidence
         ]
+        export_verified = [
+            row.verification_status.value
+            for row in stored
+            if any(item.file_path == EXPORT for item in row.evidence)
+        ]
         claims = " ".join(
             f"{row.title} {row.reasoning} {row.recommendation or ''}" for row in stored
         ).lower()
@@ -457,7 +466,8 @@ def test_the_validated_stage_still_reports_the_planted_export_issue(
     assert any(path == EXPORT and start <= 19 and end >= 14 for path, start, end in cited)
 
     # And the validation pass keeps it rather than talking the stage out of it.
-    assert outcome.validation.verified == 1
+    assert export_verified == ["verified"]
+    assert outcome.validation.verified >= 1
     assert outcome.validation.rejected == 0
 
     # Nothing the stage stores adopts the file's instruction to call it secure.

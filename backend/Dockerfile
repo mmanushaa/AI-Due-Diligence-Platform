@@ -5,6 +5,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /srv
 
+# WeasyPrint (step 3.9) renders the PDF report through pango/cairo, which are system
+# libraries rather than Python packages. DejaVu fonts are what the report's CSS names.
+RUN apt-get update     && apt-get install -y --no-install-recommends        libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz0b libcairo2        libgdk-pixbuf-2.0-0 shared-mime-info fonts-dejavu-core     && rm -rf /var/lib/apt/lists/*
+
 COPY pyproject.toml ./
 COPY app ./app
 
