@@ -151,11 +151,13 @@ def make_read_only(directory: Path) -> None:
     On Windows the read-only attribute is the closest available equivalent.
     """
     for path in sorted(directory.rglob("*"), key=lambda p: len(p.parts), reverse=True):
+        # Read-only, but readable by every user: scanner containers run as their image's
+        # own non-root user and still have to read the snapshot through the bind mount.
         if path.is_dir():
-            path.chmod(stat.S_IRUSR | stat.S_IXUSR | stat.S_IRGRP | stat.S_IXGRP)
+            path.chmod(0o555)
         else:
-            path.chmod(stat.S_IRUSR | stat.S_IRGRP)
-    directory.chmod(stat.S_IRUSR | stat.S_IXUSR | stat.S_IRGRP | stat.S_IXGRP)
+            path.chmod(0o444)
+    directory.chmod(0o555)
 
 
 def remove_tree(path: Path) -> None:

@@ -38,6 +38,7 @@ from app.db.enums import (
     VerificationStatus,
 )
 from app.db.models import Audit, Evidence, Finding, ScannerRun
+from app.scanners.mounts import docker_source, prepare_output_dir
 from app.scanners.common import (
     MAX_ERROR_CHARS,
     MAX_SNIPPET_CHARS,
@@ -381,15 +382,15 @@ def build_command(
         "--cpus",
         config.cpu_limit,
         "-v",
-        f"{Path(snapshot).resolve().as_posix()}:{SNAPSHOT_MOUNT}:ro",
+        f"{docker_source(snapshot)}:{SNAPSHOT_MOUNT}:ro",
         "-v",
-        f"{Path(output_dir).resolve().as_posix()}:{OUTPUT_MOUNT}",
+        f"{docker_source(output_dir)}:{OUTPUT_MOUNT}",
     ]
     roots = [SNAPSHOT_MOUNT]
     if manifest_dir is not None:
         command += [
             "-v",
-            f"{Path(manifest_dir).resolve().as_posix()}:{MANIFEST_MOUNT}:ro",
+            f"{docker_source(manifest_dir)}:{MANIFEST_MOUNT}:ro",
         ]
         roots.append(MANIFEST_MOUNT)
     command += [config.image, "scan", "source", "--offline", "--offline-vulnerabilities"]
@@ -435,7 +436,7 @@ def run_osv(
     synthetic: dict[str, str] | None = None,
 ) -> OsvRunResult:
     """Execute the scanner image and parse its JSON report."""
-    output_dir.mkdir(parents=True, exist_ok=True)
+    prepare_output_dir(output_dir)
     report_path = output_dir / "report.json"
     report_path.unlink(missing_ok=True)
 

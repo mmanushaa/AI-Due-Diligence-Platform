@@ -59,6 +59,9 @@ services:
   api:
     build:
       context: ./backend
+      # Without an explicit target the image resolves to the last stage (worker),
+      # and the API container would start a Celery worker instead of uvicorn.
+      target: api
     environment:
       # In-network addresses, derived from the same .env values as the postgres service.
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-due_diligence}
@@ -72,6 +75,10 @@ services:
       LLM_DEFAULT_MODEL: ${LLM_DEFAULT_MODEL:-gpt-4o-mini}
       LLM_TRIAGE_MODEL: ${LLM_TRIAGE_MODEL:-gpt-4o-mini}
       LLM_FALLBACK_MODEL: ${LLM_FALLBACK_MODEL:-gpt-4o}
+      # The API writes the extracted snapshot here; the worker reads it back.
+      UPLOAD_DIR: /srv/data/uploads
+    volumes:
+      - ./data:/srv/data
     ports:
       - "8000:8000"
     depends_on:
@@ -81,6 +88,12 @@ services:
         condition: service_healthy
       litellm:
         condition: service_started
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
 
   # Celery worker (step 1.9). Runs the audit pipeline: intake validation, file
   # filtering and the scanners. Scanner containers are started through the host
@@ -95,6 +108,11 @@ services:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-due_diligence}
       REDIS_URL: redis://redis:6379/0
       UPLOAD_DIR: /srv/data/uploads
+      # Scanner containers run on the host daemon, so bind sources are rewritten
+      # from the in-container data root to the host's copy of the same directory.
+      CONTAINER_DATA_DIR: /srv/data
+      HOST_DATA_DIR: ${HOST_DATA_DIR:-}
+      AGENTS_ENABLED: ${AGENTS_ENABLED:-true}
       # Agent calls go through the gateway, as in the api service.
       LITELLM_BASE_URL: http://litellm:4000
       LITELLM_API_KEY: ${LITELLM_API_KEY:-sk-local-dev}
@@ -114,6 +132,33 @@ services:
         condition: service_healthy
       litellm:
         condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A app.jobs.celery_app inspect ping -t 10 >/dev/null 2>&1"]
+      interval: 15s
+      timeout: 15s
+      retries: 8
+      start_period: 30s
+
+  # One-shot account seeding (step 3.12). Run explicitly:
+  #   docker compose run --rm seed
+  # The SEED_* values come from the shell or .env; nothing is baked into the image.
+  seed:
+    profiles: ["tools"]
+    build:
+      context: ./backend
+      target: api
+    command: ["python", "scripts/seed_users.py"]
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-due_diligence}
+      SEED_ANALYST_EMAIL: ${SEED_ANALYST_EMAIL:-}
+      SEED_ANALYST_PASSWORD: ${SEED_ANALYST_PASSWORD:-}
+      SEED_REVIEWER_EMAIL: ${SEED_REVIEWER_EMAIL:-}
+      SEED_REVIEWER_PASSWORD: ${SEED_REVIEWER_PASSWORD:-}
+      SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL:-}
+      SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   # Minimal UI (step 1.10). Vite dev server for local walkthroughs; it proxies
   # /api to the api service (see frontend/vite.config.ts).
@@ -129,6 +174,12 @@ services:
       - "5173:5173"
     depends_on:
       - api
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:5173/').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 180s
 
   # Langfuse (step 3.8). Self-hosted tracing: one trace per audit, one generation per
   # model call. Langfuse v2 needs its own Postgres, ClickHouse for trace storage and

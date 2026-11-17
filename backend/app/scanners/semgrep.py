@@ -30,6 +30,7 @@ from app.db.enums import (
     VerificationStatus,
 )
 from app.db.models import Audit, Evidence, Finding, ScannerRun
+from app.scanners.mounts import docker_source, prepare_output_dir
 from app.scanners.common import (
     MAX_ERROR_CHARS,
     MAX_SNIPPET_CHARS,
@@ -120,9 +121,9 @@ def build_command(
         "--cpus",
         config.cpu_limit,
         "-v",
-        f"{Path(snapshot).resolve().as_posix()}:{SNAPSHOT_MOUNT}:ro",
+        f"{docker_source(snapshot)}:{SNAPSHOT_MOUNT}:ro",
         "-v",
-        f"{Path(output_dir).resolve().as_posix()}:{OUTPUT_MOUNT}",
+        f"{docker_source(output_dir)}:{OUTPUT_MOUNT}",
         config.image,
         "scan",
     ]
@@ -190,7 +191,7 @@ def run_semgrep(
     config: SemgrepConfig = SemgrepConfig(),
 ) -> SemgrepRunResult:
     """Execute the scanner image and parse its JSON report."""
-    output_dir.mkdir(parents=True, exist_ok=True)
+    prepare_output_dir(output_dir)
     report_path = output_dir / "report.json"
     report_path.unlink(missing_ok=True)
 

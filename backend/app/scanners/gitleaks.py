@@ -33,6 +33,7 @@ from app.db.enums import (
     VerificationStatus,
 )
 from app.db.models import Audit, Evidence, Finding, ScannerRun
+from app.scanners.mounts import docker_source, prepare_output_dir
 from app.scanners.common import (
     MAX_ERROR_CHARS,
     MAX_SNIPPET_CHARS,
@@ -107,9 +108,9 @@ def build_command(
         "--cpus",
         config.cpu_limit,
         "-v",
-        f"{Path(snapshot).resolve().as_posix()}:{SNAPSHOT_MOUNT}:ro",
+        f"{docker_source(snapshot)}:{SNAPSHOT_MOUNT}:ro",
         "-v",
-        f"{Path(output_dir).resolve().as_posix()}:{OUTPUT_MOUNT}",
+        f"{docker_source(output_dir)}:{OUTPUT_MOUNT}",
         config.image,
         "dir",
         SNAPSHOT_MOUNT,
@@ -147,7 +148,7 @@ def run_gitleaks(
     config: GitleaksConfig = GitleaksConfig(),
 ) -> GitleaksRunResult:
     """Execute the scanner image and parse its JSON report."""
-    output_dir.mkdir(parents=True, exist_ok=True)
+    prepare_output_dir(output_dir)
     report_path = output_dir / "report.json"
     report_path.unlink(missing_ok=True)
 
@@ -177,7 +178,8 @@ def run_gitleaks(
         )
 
     stderr = redact_text(completed.stderr or "")[:MAX_ERROR_CHARS]
-    if completed.returncode != 0:
+    # gitleaks exits 0 when clean and 1 when it found leaks; anything else is an error.
+    if completed.returncode not in (0, 1):
         return GitleaksRunResult(
             leaks=(),
             version=config.image,

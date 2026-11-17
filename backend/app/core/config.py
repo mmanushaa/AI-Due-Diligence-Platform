@@ -73,6 +73,9 @@ class Settings(BaseSettings):
     llm_max_output_tokens: int = 1_024
     llm_temperature: float = 0.0
     llm_timeout_seconds: float = 60.0
+    # With no model (a clean-machine run, an offline demo) the agent stage can be
+    # skipped deliberately; scanner findings still reach risk, review and report.
+    agents_enabled: bool = True
 
     # Retry policy: attempts per model, then exponential backoff between them.
     llm_max_attempts: int = 3

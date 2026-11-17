@@ -30,3 +30,12 @@ data/
 
 # Scanner raw output
 scanner-output/
+
+# Clean-run outputs (scripts/clean_run.sh)
+artifacts/
+
+# Local AI chat exports (conversation dumps, not project source)
+.cloud-attachments/
+
+# Local editor settings
+.vscode/

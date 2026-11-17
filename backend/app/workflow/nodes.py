@@ -30,6 +30,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.agents.multi import run_multi_agent
+from app.core.config import settings as app_settings
 from app.db.enums import (
     AuditStatus,
     FindingOrigin,
@@ -312,7 +313,7 @@ def route(state: AuditState, services: WorkflowServices | None = None) -> dict[s
     services = services or WorkflowServices()
 
     def work() -> dict[str, Any]:
-        target = "agents" if not state.budget_exceeded else "skip"
+        target = "agents" if app_settings.agents_enabled and not state.budget_exceeded else "skip"
         return {
             "route": target,
             "stage": "route",

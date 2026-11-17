@@ -1,0 +1,88 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend tests (unit, scanners, adversarial)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: due_diligence
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres -d due_diligence"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/due_diligence
+      REDIS_URL: redis://localhost:6379/0
+      JWT_SECRET: ci-only-secret-not-used-outside-tests
+      # Model calls are stubbed in tests; no gateway is reachable and none is needed.
+      LITELLM_BASE_URL: ""
+      LITELLM_API_KEY: ""
+      UPLOAD_DIR: ./data/uploads
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+
+      - name: Install backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e "backend[dev]"
+
+      - name: Apply migrations
+        working-directory: backend
+        run: python -m alembic -c alembic.ini upgrade head
+
+      - name: Unit tests
+        run: >
+          python -m pytest tests
+          -q
+          --ignore=tests/test_gitleaks_adapter.py
+          --ignore=tests/test_semgrep_adapter.py
+          --ignore=tests/test_osv_adapter.py
+          --ignore=tests/test_scancode_adapter.py
+          --ignore=tests/test_prompt_injection.py
+
+      - name: Scanner adapter tests
+        run: >
+          python -m pytest
+          tests/test_gitleaks_adapter.py
+          tests/test_semgrep_adapter.py
+          tests/test_osv_adapter.py
+          tests/test_scancode_adapter.py
+          tests/test_scanner_orchestrator.py
+          -q
+
+      - name: Adversarial tests
+        run: python -m pytest tests/test_prompt_injection.py -q

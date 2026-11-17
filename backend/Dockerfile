@@ -11,6 +11,8 @@ RUN apt-get update     && apt-get install -y --no-install-recommends        libp
 
 COPY pyproject.toml ./
 COPY app ./app
+# scripts/seed_users.py runs inside this image (docker compose run --rm seed).
+COPY scripts ./scripts
 
 RUN pip install --no-cache-dir .
 

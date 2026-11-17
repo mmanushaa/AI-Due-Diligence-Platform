@@ -7,16 +7,43 @@ risk pauses for a human decision.
 The design lives in [docs/](docs/): PRD, TRD, App Flow, UI/UX Brief, Backend Schema and
 Build Roadmap. This repository follows the TRD layout and the roadmap step order.
 
+## Quickstart (clean machine)
+
+Prerequisites: Docker with Compose, Git Bash or any POSIX shell, and Python 3.12+ on
+the host (the script uses it to build the fixture archive and read JSON). Nothing else
+needs to be installed.
+
+```bash
+cp .env.example .env      # then edit it; scripts/clean_run.sh will do this for you
+docker compose up -d --build
+./scripts/seed.sh        # creates the accounts named by SEED_* in .env
+# UI: http://localhost:5173   API: http://localhost:8000/health
+```
+
+One command takes a fresh checkout through the whole product:
+
+```bash
+./scripts/clean_run.sh
+```
+
+It writes `.env` with a random JWT secret and one random password per role when the
+file is absent, starts the services it needs and waits for their healthchecks, seeds
+the accounts, uploads `scripts/fixtures/release_app`, runs an audit to the review gate,
+approves it as the reviewer, and downloads the PDF to `artifacts/`. The fixture's three
+"credentials" are fake: it exists so the run reaches the gate without a model call.
+
+Model-backed audit stages need a reachable LiteLLM provider; `docker/litellm/config.yaml`
+is the routing table and the provider key goes in `.env`. Scans-only work needs no key.
+
 ## Status
 
-Steps **0.1** through **2.6** are in place: project skeleton, Compose and health check,
-benchmark fixtures, schema, safe zip intake, file filtering, the four scanner adapters,
-parallel scanner orchestration, indexing and hybrid retrieval, the LiteLLM gateway with a
-per-audit budget, and the evaluation harness. Docker Compose runs `postgres` (pgvector,
-with the `vector` and `pg_trgm` extensions), `redis`, `litellm` and the FastAPI `api`,
-which exposes `GET /health` and `POST /api/v1/repositories`. Findings are stored with
-masked secrets and code evidence; there are no agents or UI yet, so only the
-`scanners_only` benchmark configuration can run.
+Steps **0.1** through **3.11** are implemented: safe zip intake, the four scanner
+adapters, indexing and hybrid retrieval, CrewAI agents with validation, the LangGraph
+workflow with retries and a Postgres checkpointer, deterministic risk aggregation, the
+human review gate, an append-only audit trail, JWT authentication with roles, SSE
+progress, Langfuse tracing with a per-audit budget, the reporter with HTML and PDF
+exports, the full React UI, and the benchmark harness. Every Compose service declares a
+healthcheck. The test suite runs in CI (unit, scanner adapter and adversarial tests).
 
 ## Layout
 
@@ -48,7 +75,7 @@ masked secrets and code evidence; there are no agents or UI yet, so only the
 - Docker with Compose
 - PostgreSQL 16 with `pgvector` and `pg_trgm`, and Redis (both provided by Compose)
 
-## Setup
+## Manual setup (for development)
 
 ```bash
 # 1. Environment file (placeholders only; never commit .env)
