@@ -1,9 +1,10 @@
-"""The overall risk level for an audit (step 3.4).
+"""The overall risk level for an audit (steps 3.3 and 3.4).
 
-One deterministic rule, so a reviewer can always reconstruct how a level was
-reached: the audit's level is the highest severity among its findings that no
-validation pass rejected. A single critical finding makes the audit critical; that
-is the floor rule, and it is stored on the row as ``rule_applied``.
+The arithmetic lives in :mod:`app.risk.scoring`: a severity floor, a short list of
+named escalation rules that can only raise the level, and an aggregate score that is a
+sum rather than an average. This module is the database half - it reads the findings,
+stores the result and keeps the per-finding factors that produced it, so a reviewer can
+reconstruct the score by hand.
 
 Assessments are append-only. A human override does not edit the row it disagrees
 with: it writes a new row whose ``supersedes_id`` points at the old one, so the
@@ -15,29 +16,15 @@ from __future__ import annotations
 import uuid
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
-from app.db.enums import AssessmentStatus, Severity, VerificationStatus
-from app.db.models import Finding, RiskAssessment
+from app.db.enums import AssessmentStatus, Severity
+from app.db.models import Finding, RiskAssessment, RiskFactor
+from app.risk.scoring import EXCLUDED, SEVERITY_WEIGHT, FindingInput, Score, evaluate
 
+#: Kept for callers that only care about the base rule; the stored ``rule_applied``
+#: names any escalation that fired as well (``severity_floor+aggregate_score``).
 RULE = "severity_floor"
-SEVERITY_ORDER = (
-    Severity.CRITICAL,
-    Severity.HIGH,
-    Severity.MEDIUM,
-    Severity.LOW,
-    Severity.INFO,
-)
-#: A finding the validator rejected is not risk: it is a claim that failed.
-EXCLUDED = (VerificationStatus.REJECTED_FALSE_POSITIVE,)
-
-
-def highest_severity(levels: list[Severity]) -> Severity:
-    """The worst level in the list; ``info`` when it is empty."""
-    for candidate in SEVERITY_ORDER:
-        if candidate in levels:
-            return candidate
-    return Severity.INFO
 
 
 def current_assessment(session: Session, audit_id: uuid.UUID) -> RiskAssessment | None:
@@ -50,38 +37,102 @@ def current_assessment(session: Session, audit_id: uuid.UUID) -> RiskAssessment 
     ).scalars().first()
 
 
+def _inputs(findings: list[Finding]) -> list[FindingInput]:
+    return [
+        FindingInput(
+            severity=row.severity,
+            confidence=row.confidence,
+            status=row.verification_status,
+            category=row.category,
+            title=row.title,
+            evidence_paths=tuple(
+                evidence.file_path for evidence in row.evidence if evidence.file_path
+            ),
+        )
+        for row in findings
+    ]
+
+
+def score_findings(findings: list[Finding]) -> Score:
+    """Pure scoring for a list of rows; the DB write happens in :func:`assess`."""
+    return evaluate(_inputs(findings))
+
+
+def _counted(findings: list[Finding]) -> list[Finding]:
+    return [row for row in findings if row.verification_status not in EXCLUDED]
+
+
+def _factor_rows(
+    assessment_id: uuid.UUID, findings: list[Finding], score: Score
+) -> list[RiskFactor]:
+    counted = _counted(findings)
+    rows: list[RiskFactor] = []
+    for finding, item in zip(counted, score.per_finding):
+        rows.append(
+            RiskFactor(
+                assessment_id=assessment_id,
+                finding_id=finding.id,
+                severity_weight=item.severity_weight,
+                evidence_confidence=item.evidence_confidence,
+                exposure_multiplier=item.exposure_multiplier,
+                finding_score=item.score,
+                notes=item.notes,
+            )
+        )
+    return rows
+
+
 def assess(session: Session, audit_id: uuid.UUID) -> RiskAssessment:
-    """Compute and store this audit's risk level."""
+    """Compute this audit's risk level from its findings and store it."""
     findings = list(
-        session.execute(select(Finding).where(Finding.audit_id == audit_id)).scalars()
+        session.execute(
+            select(Finding)
+            .where(Finding.audit_id == audit_id)
+            .options(selectinload(Finding.evidence))
+        ).scalars().unique()
     )
-    live = [row for row in findings if row.verification_status not in EXCLUDED]
-    level = highest_severity([row.severity for row in live])
+    score = score_findings(findings)
     previous = current_assessment(session, audit_id)
 
     assessment = RiskAssessment(
         audit_id=audit_id,
-        overall_level=level,
-        overall_score=None,
-        rule_applied=RULE,
-        rationale=(
-            f"{len(live)} finding(s) counted, {len(findings) - len(live)} rejected by"
-            f" validation; the highest counted severity is {level.value}, so the level"
-            f" is {level.value}."
-        ),
+        overall_level=score.level,
+        overall_score=score.score,
+        rule_applied=score.rule_applied,
+        rationale=score.rationale,
         technical_summary={
             "findings": len(findings),
-            "counted": len(live),
-            "highest": level.value,
+            "counted": sum(score.counts.values()),
+            "rejected": len(findings) - sum(score.counts.values()),
+            "counts": score.counts,
+            "highest": score.floor.value,
+            "score": str(score.score),
+            "escalations": list(score.rules),
+            "severity_weights": {
+                level.value: str(weight) for level, weight in SEVERITY_WEIGHT.items()
+            },
+            "factors": [
+                {
+                    "finding_id": str(finding.id),
+                    "severity_weight": str(item.severity_weight),
+                    "evidence_confidence": str(item.evidence_confidence),
+                    "exposure_multiplier": str(item.exposure_multiplier),
+                    "score": str(item.score),
+                    "hints": list(item.hints),
+                }
+                for finding, item in zip(_counted(findings), score.per_finding)
+            ],
         },
         status=(
             AssessmentStatus.PENDING_REVIEW
-            if level is Severity.CRITICAL
+            if score.level is Severity.CRITICAL
             else AssessmentStatus.FINAL
         ),
         supersedes_id=previous.id if previous is not None else None,
     )
     session.add(assessment)
+    session.flush()
+    session.add_all(_factor_rows(assessment.id, findings, score))
     session.commit()
     session.refresh(assessment)
     return assessment
