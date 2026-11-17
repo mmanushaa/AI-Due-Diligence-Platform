@@ -60,6 +60,7 @@ class FindingEntry(BaseModel):
     category: str
     severity: str
     status: str
+    confidence: float | None = None
     file_path: str | None = None
     line_start: int | None = None
     line_end: int | None = None
@@ -92,6 +93,8 @@ class FindingDetail(BaseModel):
     source_tool: str | None = None
     scanner_tool: str | None = None
     fingerprint: str
+    confidence: float | None = None
+    business_impact: str | None = None
     recommendation: str | None = None
     verdict: str | None = None
     evidence: list[EvidenceOut] = []

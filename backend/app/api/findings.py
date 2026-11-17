@@ -72,7 +72,7 @@ def list_findings(
     severity: str | None = Query(None, description="Severity to filter by"),
     status: str | None = Query(None, description="Verification status to filter by"),
     file: str | None = Query(None, description="file path substring filter"),
-    user=Depends(require_roles(UserRole.ANALYST)),
+    user=Depends(require_roles(UserRole.ANALYST, UserRole.REVIEWER)),
     session: Session = Depends(get_session),
 ):
     audit = session.get(Audit, audit_id)
@@ -147,6 +147,7 @@ def list_findings(
                 category=f.category.value,
                 severity=f.severity.value,
                 status=f.verification_status.value,
+                confidence=float(f.confidence) if f.confidence is not None else None,
                 file_path=(_primary_evidence(f).file_path if _primary_evidence(f) else None),
                 line_start=(_primary_evidence(f).line_start if _primary_evidence(f) else None),
                 line_end=(_primary_evidence(f).line_end if _primary_evidence(f) else None),
@@ -175,7 +176,7 @@ def list_findings(
 )
 def get_finding(
     finding_id: uuid.UUID,
-    user=Depends(require_roles(UserRole.ANALYST)),
+    user=Depends(require_roles(UserRole.ANALYST, UserRole.REVIEWER)),
     session: Session = Depends(get_session),
 ):
     stmt = (
@@ -204,6 +205,8 @@ def get_finding(
         source_tool=finding.source_tool,
         scanner_tool=getattr(finding, "scanner_tool", None),
         fingerprint=finding.fingerprint,
+        confidence=float(finding.confidence) if finding.confidence is not None else None,
+        business_impact=finding.business_impact,
         recommendation=finding.recommendation,
         verdict=finding.verdict.value if finding.verdict else None,
         evidence=[

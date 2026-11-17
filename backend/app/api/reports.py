@@ -54,7 +54,7 @@ def _document(session: Session, audit_id: uuid.UUID, user, fmt: str):
 )
 def audit_report(
     audit_id: uuid.UUID,
-    user: User = Depends(require_roles(UserRole.ANALYST)),
+    user: User = Depends(require_roles(UserRole.ANALYST, UserRole.REVIEWER)),
     session: Session = Depends(get_session),
 ) -> HTMLResponse:
     document = _document(session, audit_id, user, "html")
@@ -68,7 +68,7 @@ def audit_report(
 )
 def audit_report_pdf(
     audit_id: uuid.UUID,
-    user: User = Depends(require_roles(UserRole.ANALYST)),
+    user: User = Depends(require_roles(UserRole.ANALYST, UserRole.REVIEWER)),
     session: Session = Depends(get_session),
 ) -> Response:
     document = _document(session, audit_id, user, "pdf")

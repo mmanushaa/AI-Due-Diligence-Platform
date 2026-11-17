@@ -28,7 +28,7 @@ from app.progress import publish_progress
 router = APIRouter(prefix="/api/v1", tags=["audits"])
 
 
-class AuditOut(BaseModel):
+class AuditResponse(BaseModel):
     id: uuid.UUID
     repository_id: uuid.UUID
     status: str
@@ -54,8 +54,8 @@ def _failure_reason(session: Session, audit_id: uuid.UUID) -> str | None:
     return (entry or {}).get("reason") if isinstance(entry, dict) else None
 
 
-def _to_out(session: Session, audit: Audit) -> AuditOut:
-    return AuditOut(
+def _to_out(session: Session, audit: Audit) -> AuditResponse:
+    return AuditResponse(
         id=audit.id,
         repository_id=audit.repository_id,
         status=audit.status.value,
@@ -69,14 +69,14 @@ def _to_out(session: Session, audit: Audit) -> AuditOut:
 
 @router.post(
     "/repositories/{repository_id}/audits",
-    response_model=AuditOut,
+    response_model=AuditResponse,
     status_code=status.HTTP_202_ACCEPTED,
 )
 def start_audit(
     repository_id: uuid.UUID,
     user: User = Depends(require_roles(UserRole.ANALYST)),
     session: Session = Depends(get_session),
-) -> AuditOut:
+) -> AuditResponse:
     """Queue an audit for an uploaded repository and hand it to the worker."""
     repository = session.get(Repository, repository_id)
     if repository is None:
@@ -130,12 +130,12 @@ def start_audit(
     return _to_out(session, audit)
 
 
-@router.get("/audits/{audit_id}", response_model=AuditOut)
+@router.get("/audits/{audit_id}", response_model=AuditResponse)
 def read_audit(
     audit_id: uuid.UUID,
-    user: User = Depends(require_roles(UserRole.ANALYST)),
+    user: User = Depends(require_roles(UserRole.ANALYST, UserRole.REVIEWER)),
     session: Session = Depends(get_session),
-) -> AuditOut:
+) -> AuditResponse:
     """Return the audit's status, current stage and failure reason, if any."""
     audit = session.get(Audit, audit_id)
     if audit is None:

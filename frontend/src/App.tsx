@@ -1,92 +1,91 @@
-import { useState } from "react";
-import UploadPage from "./pages/UploadPage";
-import StatusPage from "./pages/StatusPage";
-import FindingsPage from "./pages/Findings";
-import LoginForm from "./components/LoginForm";
-import { getToken, logout, type SessionUser, type UploadedRepository } from "./lib/api";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { BrowserRouter, Route, Routes } from "react-router-dom";
+import AppLayout from "./components/AppLayout";
+import { RequireAuth, RequireRole } from "./components/guards";
+import { AuthProvider } from "./context/AuthContext";
+import { ThemeProvider } from "./context/ThemeContext";
+import AuditLogPage from "./pages/AuditLogPage";
+import AuditProgressPage from "./pages/AuditProgressPage";
+import BenchmarksPage from "./pages/BenchmarksPage";
+import DashboardPage from "./pages/DashboardPage";
+import FindingDetailPage from "./pages/FindingDetailPage";
+import FindingsPage from "./pages/FindingsPage";
+import LoginPage from "./pages/LoginPage";
+import NotFoundPage from "./pages/NotFoundPage";
+import RepositoriesPage from "./pages/RepositoriesPage";
+import ReportPage from "./pages/ReportPage";
+import ReviewDetailPage from "./pages/ReviewDetailPage";
+import ReviewQueuePage from "./pages/ReviewQueuePage";
+import RiskPage from "./pages/RiskPage";
+import SettingsPage from "./pages/SettingsPage";
 
-type View = "upload" | "status" | "findings";
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: { retry: 1, refetchOnWindowFocus: false },
+  },
+});
 
-function App() {
-  const [view, setView] = useState<View>("upload");
-  const [repo, setRepo] = useState<UploadedRepository | null>(null);
-  const [auditId, setAuditId] = useState<string | null>(null);
-  // Every endpoint needs a bearer token since step 3.6, so the app starts signed out.
-  const [user, setUser] = useState<SessionUser | null>(null);
-  const [signedIn, setSignedIn] = useState(() => getToken() !== null);
-
-  if (!signedIn) {
-    return (
-      <div className="app">
-        <LoginForm
-          onSignedIn={(next) => {
-            setUser(next);
-            setSignedIn(true);
-          }}
-        />
-      </div>
-    );
-  }
-
+export default function App() {
   return (
-    <div className="app">
-      <nav className="top-nav">
-        <span className="brand">AI Due Diligence</span>
-        <div className="nav-links">
-          <button
-            className={`nav-btn${view === "upload" ? " active" : ""}`}
-            onClick={() => setView("upload")}
-          >
-            Upload
-          </button>
-          <button
-            className={`nav-btn${view === "status" ? " active" : ""}`}
-            onClick={() => repo && setView("status")}
-            disabled={!repo}
-          >
-            Status
-          </button>
-          <button
-            className={`nav-btn${view === "findings" ? " active" : ""}`}
-            onClick={() => auditId && setView("findings")}
-            disabled={!auditId}
-          >
-            Findings
-          </button>
-          <button
-            className="nav-btn"
-            onClick={() => {
-              logout();
-              setUser(null);
-              setSignedIn(false);
-            }}
-            title={user ? `${user.email} (${user.role})` : "sign out"}
-          >
-            Sign out
-          </button>
-        </div>
-      </nav>
+    <QueryClientProvider client={queryClient}>
+      <ThemeProvider>
+        <AuthProvider>
+          <BrowserRouter>
+            <Routes>
+              <Route path="/login" element={<LoginPage />} />
+              <Route element={<RequireAuth />}>
+                <Route element={<AppLayout />}>
+                  <Route index element={<DashboardPage />} />
 
-      <main className="main">
-        {view === "upload" && (
-          <UploadPage
-            onUploaded={(uploaded) => {
-              setRepo(uploaded);
-              setAuditId(null);
-              setView("status");
-            }}
-          />
-        )}
-        {view === "status" && (
-          <StatusPage
-            repositoryId={repo?.id}
-            onAuditStarted={(id) => setAuditId(id)}
-          />
-        )}
-        {view === "findings" && auditId && <FindingsPage auditId={auditId} />}
-      </main>
-    </div>
+                  <Route
+                    path="repositories"
+                    element={<RequireRole roles={["analyst"]} what="repositories and upload" />}
+                  >
+                    <Route index element={<RepositoriesPage />} />
+                  </Route>
+
+                  <Route
+                    element={
+                      <RequireRole roles={["analyst", "reviewer"]} what="audit results" />
+                    }
+                  >
+                    <Route path="audits/:auditId/progress" element={<AuditProgressPage />} />
+                    <Route path="audits/:auditId/findings" element={<FindingsPage />} />
+                    <Route
+                      path="audits/:auditId/findings/:findingId"
+                      element={<FindingDetailPage />}
+                    />
+                    <Route path="audits/:auditId/risk" element={<RiskPage />} />
+                    <Route path="audits/:auditId/report" element={<ReportPage />} />
+                  </Route>
+
+                  <Route
+                    path="audits/:auditId/audit-log"
+                    element={<RequireRole roles={["reviewer"]} what="the audit log" />}
+                  >
+                    <Route index element={<AuditLogPage />} />
+                  </Route>
+
+                  <Route path="reviews" element={<RequireRole roles={["reviewer"]} what="reviews" />}>
+                    <Route index element={<ReviewQueuePage />} />
+                    <Route path=":reviewId" element={<ReviewDetailPage />} />
+                  </Route>
+
+                  <Route path="benchmarks" element={<RequireRole roles={["admin"]} what="benchmark results" />}>
+                    <Route index element={<BenchmarksPage />} />
+                  </Route>
+
+                  <Route path="settings" element={<RequireRole roles={["admin"]} what="settings" />}>
+                    <Route index element={<SettingsPage />} />
+                  </Route>
+
+                  <Route path="*" element={<NotFoundPage />} />
+                </Route>
+              </Route>
+            </Routes>
+          </BrowserRouter>
+        </AuthProvider>
+      </ThemeProvider>
+    </QueryClientProvider>
   );
 }
-
-export default App;
