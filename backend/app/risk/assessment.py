@@ -20,7 +20,14 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.db.enums import AssessmentStatus, Severity
 from app.db.models import Finding, RiskAssessment, RiskFactor
-from app.risk.scoring import EXCLUDED, SEVERITY_WEIGHT, FindingInput, Score, evaluate
+from app.risk.scoring import (
+    EXCLUDED,
+    SEVERITY_WEIGHT,
+    FindingInput,
+    FindingScore,
+    Score,
+    evaluate,
+)
 
 #: Kept for callers that only care about the base rule; the stored ``rule_applied``
 #: names any escalation that fired as well (``severity_floor+aggregate_score``).
@@ -62,12 +69,27 @@ def _counted(findings: list[Finding]) -> list[Finding]:
     return [row for row in findings if row.verification_status not in EXCLUDED]
 
 
+def _ordered_factors(
+    findings: list[Finding], score: Score
+) -> list[tuple[Finding, FindingScore]]:
+    """Each counted finding paired with its score, strongest contribution first.
+
+    The query that reads the findings has no ORDER BY, so a summary built straight
+    from it would list factors in whatever order Postgres returned them while every
+    reader (the API and the stored rows' own query) orders by ``finding_score``
+    descending. Fixing the order here keeps the stored summary and the stored rows
+    saying the same thing. The finding id breaks ties so the order is total.
+    """
+    pairs = list(zip(_counted(findings), score.per_finding))
+    pairs.sort(key=lambda pair: (-pair[1].score, str(pair[0].id)))
+    return pairs
+
+
 def _factor_rows(
-    assessment_id: uuid.UUID, findings: list[Finding], score: Score
+    assessment_id: uuid.UUID, pairs: list[tuple[Finding, FindingScore]]
 ) -> list[RiskFactor]:
-    counted = _counted(findings)
     rows: list[RiskFactor] = []
-    for finding, item in zip(counted, score.per_finding):
+    for finding, item in pairs:
         rows.append(
             RiskFactor(
                 assessment_id=assessment_id,
@@ -92,6 +114,7 @@ def assess(session: Session, audit_id: uuid.UUID) -> RiskAssessment:
         ).scalars().unique()
     )
     score = score_findings(findings)
+    pairs = _ordered_factors(findings, score)
     previous = current_assessment(session, audit_id)
 
     assessment = RiskAssessment(
@@ -120,7 +143,7 @@ def assess(session: Session, audit_id: uuid.UUID) -> RiskAssessment:
                     "score": str(item.score),
                     "hints": list(item.hints),
                 }
-                for finding, item in zip(_counted(findings), score.per_finding)
+                for finding, item in pairs
             ],
         },
         status=(
@@ -132,7 +155,7 @@ def assess(session: Session, audit_id: uuid.UUID) -> RiskAssessment:
     )
     session.add(assessment)
     session.flush()
-    session.add_all(_factor_rows(assessment.id, findings, score))
+    session.add_all(_factor_rows(assessment.id, pairs))
     session.commit()
     session.refresh(assessment)
     return assessment
