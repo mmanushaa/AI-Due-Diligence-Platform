@@ -13,6 +13,9 @@ COPY pyproject.toml ./
 COPY app ./app
 # scripts/seed_users.py runs inside this image (docker compose run --rm seed).
 COPY scripts ./scripts
+# Alembic runs inside this image through the `migrate` service.
+COPY alembic.ini ./
+COPY migrations ./migrations
 
 RUN pip install --no-cache-dir .
 

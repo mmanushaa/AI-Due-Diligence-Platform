@@ -9,35 +9,41 @@ Build Roadmap. This repository follows the TRD layout and the roadmap step order
 
 ## Quickstart (clean machine)
 
-Prerequisites: Docker with Compose, Git Bash or any POSIX shell, and Python 3.12+ on
-the host (the script uses it to build the fixture archive and read JSON). Nothing else
-needs to be installed.
+Prerequisites: Docker with Compose, Git Bash or any POSIX shell, and Python 3.12+ on the
+host (this run used Python 3.13.5; the script uses it to build the fixture archive and
+read JSON). Nothing else needs to be installed.
+
+These are the four commands a clean machine needs, in order:
 
 ```bash
-cp .env.example .env      # then edit it; scripts/clean_run.sh will do this for you
-docker compose up -d --build
-./scripts/seed.sh        # creates the accounts named by SEED_* in .env
+cp .env.example .env          # placeholders only; no password is committed
+./scripts/build_scanners.sh   # gitleaks, semgrep, osv and scancode images at pinned versions
+docker compose up -d --build  # migrate runs first, then api, worker and frontend
+./scripts/clean_run.sh        # schema check, seed users, upload fixture, audit, PDF
 # UI: http://localhost:5173   API: http://localhost:8000/health
 ```
 
-One command takes a fresh checkout through the whole product:
+`docker compose up` runs the one-shot `migrate` service (`alembic upgrade head`, idempotent)
+before `api`, `worker` and `seed` start, so an empty database is created automatically.
 
-```bash
-./scripts/clean_run.sh
-```
-
-It writes `.env` with a random JWT secret and one random password per role when the
-file is absent, starts the services it needs and waits for their healthchecks, seeds
-the accounts, uploads `scripts/fixtures/release_app`, runs an audit to the review gate,
-approves it as the reviewer, and downloads the PDF to `artifacts/`. The fixture's three
-"credentials" are fake: it exists so the run reaches the gate without a model call.
+`clean_run.sh` fills any empty `SEED_*` value in `.env` with a random credential (JWT secret
+too), prints that the credentials are in `.env`, builds the scanner images, applies
+migrations, seeds the analyst, reviewer and admin accounts, uploads
+`scripts/fixtures/release_app`, runs an audit to the review gate, approves it as the reviewer,
+and downloads the PDF to `artifacts/`. The fixture's three "credentials" are fake: it exists
+so the run reaches the gate without a model call. `scripts/seed.sh` is the standalone seed
+step for when you have set `SEED_*` yourself.
 
 Model-backed audit stages need a reachable LiteLLM provider; `docker/litellm/config.yaml`
 is the routing table and the provider key goes in `.env`. Scans-only work needs no key.
 
+Langfuse (`langfuse`, `langfuse-db`, `clickhouse`, `s3`) can take several minutes to become
+healthy, and `s3` often reports unhealthy on a laptop. Neither Langfuse nor `s3` is needed
+for an audit: the API, worker, scanners, review gate and PDF all run without them.
+
 ## Status
 
-Steps **0.1** through **3.11** are implemented: safe zip intake, the four scanner
+Steps **0.1** through **3.12** are implemented: safe zip intake, the four scanner
 adapters, indexing and hybrid retrieval, CrewAI agents with validation, the LangGraph
 workflow with retries and a Postgres checkpointer, deterministic risk aggregation, the
 human review gate, an append-only audit trail, JWT authentication with roles, SSE
@@ -70,7 +76,7 @@ healthcheck. The test suite runs in CI (unit, scanner adapter and adversarial te
 
 ## Prerequisites
 
-- Python 3.12
+- Python 3.12+ on the host (verified here with 3.13.5)
 - Node.js 20+ (frontend, from a later step)
 - Docker with Compose
 - PostgreSQL 16 with `pgvector` and `pg_trgm`, and Redis (both provided by Compose)
@@ -115,19 +121,30 @@ backend/.venv/Scripts/python -m uvicorn app.main:app --reload --app-dir backend
 
 ## Database migrations
 
-Alembic reads `DATABASE_URL` from `.env`; no credential lives in `alembic.ini`.
+Alembic reads `DATABASE_URL` from the environment (`.env` for a host run); no credential
+lives in `alembic.ini`. `script_location` and `prepend_sys_path` use `%(here)s`, so the
+same config works from the repository root and inside the api image.
+
+Compose applies migrations for you: `migrate` is a one-shot service that runs
+`alembic upgrade head` and `api`, `worker` and `seed` wait for it to succeed. Running it
+again is a no-op when the database is current.
 
 ```bash
-cd backend
-.venv/Scripts/python -m alembic upgrade head      # apply
-.venv/Scripts/python -m alembic downgrade base    # drop everything
-.venv/Scripts/python -m alembic check             # models vs database drift
-.venv/Scripts/python -m alembic revision --autogenerate -m "change"
+docker compose run --rm migrate     # apply (idempotent)
 ```
 
+With a host virtualenv (created by `## Manual setup` below), from the repository root:
+
+```bash
+backend/.venv/Scripts/python -m alembic -c backend/alembic.ini upgrade head   # apply
+backend/.venv/Scripts/python -m alembic -c backend/alembic.ini check          # drift
+backend/.venv/Scripts/python -m alembic -c backend/alembic.ini downgrade base # drop everything
+```
+
+On macOS/Linux use `backend/.venv/bin/python` instead of `backend/.venv/Scripts/python`.
+
 Migration `0001_initial_schema` creates the 18 enum types, all 21 tables, the
-`vector(1536)` embedding column and the indexes from the Indexes section. Append-only
-triggers are intentionally absent until step 3.5.
+`vector(1536)` embedding column and the indexes from the Indexes section.
 
 ## Upload a repository
 

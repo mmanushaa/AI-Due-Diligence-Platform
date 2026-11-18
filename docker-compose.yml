@@ -56,6 +56,20 @@ services:
       retries: 10
       start_period: 20s
 
+  # One-shot schema upgrade (step 3.12b). Idempotent: `alembic upgrade head` is a no-op
+  # when the database is already current. api, worker and seed wait for it to succeed.
+  migrate:
+    build:
+      context: ./backend
+      target: api
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-due_diligence}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
   api:
     build:
       context: ./backend
@@ -88,6 +102,8 @@ services:
         condition: service_healthy
       litellm:
         condition: service_started
+      migrate:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
       interval: 10s
@@ -132,6 +148,8 @@ services:
         condition: service_healthy
       litellm:
         condition: service_started
+      migrate:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD-SHELL", "celery -A app.jobs.celery_app inspect ping -t 10 >/dev/null 2>&1"]
       interval: 15s
@@ -159,6 +177,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
 
   # Minimal UI (step 1.10). Vite dev server for local walkthroughs; it proxies
   # /api to the api service (see frontend/vite.config.ts).

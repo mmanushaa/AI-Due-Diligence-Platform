@@ -91,6 +91,7 @@ if [ -z "${SEED_ANALYST_EMAIL:-}" ] || [ -z "${SEED_ANALYST_PASSWORD:-}" ] ||
    [ -z "${SEED_REVIEWER_EMAIL:-}" ] || [ -z "${SEED_REVIEWER_PASSWORD:-}" ]; then
   fail "SEED_ANALYST_* and SEED_REVIEWER_* must be set in .env"
 fi
+echo "seed credentials are in $ROOT/.env (SEED_*_PASSWORD)"
 
 # The scanner containers run on the host daemon, so they need the host path of
 # the data directory, not the path inside the worker container.
@@ -107,11 +108,19 @@ export AGENTS_ENABLED=false
 mkdir -p "$HOST_DATA_DIR"
 echo "data directory on the host: $HOST_DATA_DIR"
 
-# --- 2. compose -------------------------------------------------------------
+# --- 2. scanner images ------------------------------------------------------
+say "scanner images"
+"$ROOT/scripts/build_scanners.sh"
+
+# --- 3. compose -------------------------------------------------------------
 say "docker compose up (postgres, redis, litellm, api, worker, frontend)"
 docker compose up -d --build --wait postgres redis litellm api worker frontend
 
-# --- 3. seed ----------------------------------------------------------------
+# --- 4. migrations ----------------------------------------------------------
+say "apply migrations"
+docker compose run --rm migrate
+
+# --- 5. seed ----------------------------------------------------------------
 say "seed users"
 docker compose run --rm seed
 
