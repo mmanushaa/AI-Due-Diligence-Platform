@@ -45,6 +45,7 @@ from sqlalchemy import text  # noqa: E402
 from app.db.session import get_engine  # noqa: E402
 from benchmark.harness import matching  # noqa: E402
 from benchmark.harness.expected import ManifestError, load_manifest  # noqa: E402
+from benchmark.report import AUTHORIZATION_ISSUES  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 EXPECTED_FILE = HERE / "expected.json"
@@ -367,6 +368,23 @@ def _selected(runs: list[Run], labels: tuple[str, ...]) -> list[Run]:
     return [run for run in runs if run.label in labels]
 
 
+def _authorization_hits(run: Run) -> int:
+    """How many of the four planted access-control gaps this run's rows matched."""
+    matched = run.totals.get("matched_ids") or []
+    return len(set(matched) & set(AUTHORIZATION_ISSUES))
+
+
+def _latest_per_label(runs: list[Run], labels: tuple[str, ...], config: str) -> list[Run]:
+    """The newest stored row for each label and configuration, so a reused label
+    contributes one run rather than several."""
+    chosen: list[Run] = []
+    for label in labels:
+        candidates = [run for run in runs if run.label == label and run.config == config]
+        if candidates:
+            chosen.append(max(candidates, key=lambda run: run.started_at or datetime.min))
+    return chosen
+
+
 def _stored_validation(run: Run) -> dict:
     """The validator's own per-repository counts, summed from ``metrics``."""
     totals = Counter()
@@ -440,10 +458,12 @@ def render(runs: list[Run], missing: list[str]) -> str:
     add("")
     add(
         "| group | label | configuration | precision | recall | false-positive rate | "
-        "evidence accuracy | severity accuracy | cross-file recall | matched | findings | "
-        "cost | runtime (s) |"
+        "evidence accuracy | severity accuracy | cross-file recall | authorization (of 4) | "
+        "matched | findings | cost | runtime (s) |"
     )
-    add("| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |")
+    add(
+        "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |"
+    )
     for group, labels in GROUPS:
         for run in _selected(runs, labels):
             totals = run.totals
@@ -455,10 +475,49 @@ def render(runs: list[Run], missing: list[str]) -> str:
                 f"{_f(totals.get('evidence_accuracy'))} | "
                 f"{_f(totals.get('severity_accuracy'))} | "
                 f"{_f(totals.get('cross_file_recall'))} | "
+                f"{_authorization_hits(run)} | "
                 f"{totals.get('matched', 0)} | {totals.get('findings', 0)} | "
                 f"{_money(totals.get('cost_usd'))} | "
                 f"{_f(float(runtime) / 1000, 1) if runtime is not None else 'not recorded'} |"
             )
+    add("")
+
+    # -- authorization recall ----------------------------------------------
+    add("## Authorization recall (the four planted access-control gaps)")
+    add("")
+    add(
+        "The four authorization issues are the ones `benchmark/report.py` names "
+        f"({', '.join(f'`{issue}`' for issue in AUTHORIZATION_ISSUES)}). Three runs can "
+        "match four each, so a group has twelve cells; the count is matched cells over "
+        "twelve, read from each row's stored `metrics.totals.matched_ids`."
+    )
+    add("")
+    add("| group | runs | matched cells | recall |")
+    add("| --- | --- | ---: | ---: |")
+    authz_groups = (
+        (
+            "repeat-* (multi_agent rows)",
+            _latest_per_label(runs, ("repeat-1", "repeat-2", "repeat-3"), "multi_agent"),
+        ),
+        (
+            "multi_agent baseline",
+            _latest_per_label(
+                runs,
+                ("stage3-multi_agent-1", "stage3-multi_agent-2", "stage3-multi_agent-3"),
+                "multi_agent",
+            ),
+        ),
+        ("valid (pre-contract)", _latest_per_label(runs, ("valid-1", "valid-2", "valid-3"), "multi_agent_validated")),
+        ("val2 (strict contract)", _latest_per_label(runs, ("val2-1", "val2-2", "val2-3"), "multi_agent_validated")),
+    )
+    for name, group_runs in authz_groups:
+        hits = sum(_authorization_hits(run) for run in group_runs)
+        cells = len(group_runs) * len(AUTHORIZATION_ISSUES)
+        labels_text = ", ".join(f"`{run.label}`" for run in group_runs) or "—"
+        add(
+            f"| {name} | {labels_text} | {hits} / {cells or 0} | "
+            f"{_f(hits / cells) if cells else 'not recorded'} |"
+        )
     add("")
 
     # -- validation outcomes ----------------------------------------------

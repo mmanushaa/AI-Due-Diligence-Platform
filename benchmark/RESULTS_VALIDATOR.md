@@ -43,38 +43,49 @@ Every number below is read back from stored rows: `eval_runs.metrics` for the sc
 
 Totals are `eval_runs.metrics.totals` exactly as the harness stored them. `matched` is planted issues the scored findings satisfied; a rejected finding is not scored, so it can never count here.
 
-| group | label | configuration | precision | recall | false-positive rate | evidence accuracy | severity accuracy | cross-file recall | matched | findings | cost | runtime (s) |
-| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| repeat-* (labels as stored) | `repeat-1` | `scanners_only` | 1.000 | 0.667 | 0.000 | 1.000 | 1.000 | 0.000 | 12 | 25 | $0.0000 | 92.7 |
-| repeat-* (labels as stored) | `repeat-1` | `single_agent_no_tools` | 0.857 | 0.667 | 0.143 | 1.000 | 1.000 | 0.000 | 12 | 33 | $0.0028 | 345.1 |
-| repeat-* (labels as stored) | `repeat-1` | `single_agent_tools` | 0.706 | 0.667 | 0.294 | 1.000 | 1.000 | 0.000 | 12 | 30 | $0.0086 | 337.7 |
-| repeat-* (labels as stored) | `repeat-1` | `multi_agent` | 0.842 | 0.889 | 0.158 | 0.938 | 0.938 | 0.667 | 16 | 32 | $0.0214 | 986.8 |
-| repeat-* (labels as stored) | `repeat-1` | `scanners_plus_deterministic` | 1.000 | 0.778 | 0.000 | 0.929 | 1.000 | 0.333 | 14 | 27 | $0.0000 | 88.0 |
-| repeat-* (labels as stored) | `repeat-2` | `scanners_only` | 1.000 | 0.667 | 0.000 | 1.000 | 1.000 | 0.000 | 12 | 25 | $0.0000 | 91.2 |
-| repeat-* (labels as stored) | `repeat-2` | `single_agent_no_tools` | 0.923 | 0.667 | 0.077 | 1.000 | 1.000 | 0.000 | 12 | 32 | $0.0030 | 247.0 |
-| repeat-* (labels as stored) | `repeat-2` | `single_agent_tools` | 0.750 | 0.667 | 0.250 | 1.000 | 1.000 | 0.000 | 12 | 29 | $0.0105 | 485.7 |
-| repeat-* (labels as stored) | `repeat-2` | `multi_agent` | 0.941 | 0.889 | 0.059 | 0.938 | 0.938 | 0.667 | 16 | 30 | $0.0183 | 656.7 |
-| repeat-* (labels as stored) | `repeat-2` | `scanners_plus_deterministic` | 1.000 | 0.778 | 0.000 | 0.929 | 1.000 | 0.333 | 14 | 27 | $0.0000 | 67.7 |
-| repeat-* (labels as stored) | `repeat-3` | `scanners_only` | 1.000 | 0.667 | 0.000 | 1.000 | 1.000 | 0.000 | 12 | 25 | $0.0000 | 61.8 |
-| repeat-* (labels as stored) | `repeat-3` | `single_agent_no_tools` | 0.875 | 0.778 | 0.125 | 1.000 | 0.929 | 0.333 | 14 | 35 | $0.0030 | 207.3 |
-| repeat-* (labels as stored) | `repeat-3` | `single_agent_tools` | 0.700 | 0.778 | 0.300 | 1.000 | 1.000 | 0.333 | 14 | 34 | $0.0107 | 967.0 |
-| repeat-* (labels as stored) | `repeat-3` | `single_agent_tools` | 0.632 | 0.667 | 0.368 | 1.000 | 1.000 | 0.000 | 12 | 32 | $0.0097 | 394.4 |
-| repeat-* (labels as stored) | `repeat-3` | `multi_agent` | 1.000 | 0.944 | 0.000 | 0.941 | 0.882 | 0.833 | 17 | 30 | $0.0218 | 521.7 |
-| repeat-* (labels as stored) | `repeat-3` | `multi_agent` | 0.938 | 0.833 | 0.062 | 0.933 | 0.933 | 0.500 | 15 | 29 | $0.0253 | 939.2 |
-| repeat-* (labels as stored) | `repeat-3` | `scanners_plus_deterministic` | 1.000 | 0.778 | 0.000 | 0.929 | 1.000 | 0.333 | 14 | 27 | $0.0000 | 69.3 |
-| repeat-* (labels as stored) | `repeat-3` | `scanners_plus_deterministic` | 1.000 | 0.778 | 0.000 | 0.929 | 1.000 | 0.333 | 14 | 27 | $0.0000 | 60.3 |
-| multi_agent baseline | `stage3-multi_agent-1` | `multi_agent` | 0.895 | 0.944 | 0.105 | 0.941 | 0.941 | 0.833 | 17 | 35 | $0.0226 | 715.5 |
-| multi_agent baseline | `stage3-multi_agent-2` | `multi_agent` | 1.000 | 0.778 | 0.000 | 0.929 | 1.000 | 0.333 | 14 | 27 | $0.0008 | 432.6 |
-| multi_agent baseline | `stage3-multi_agent-3` | `multi_agent` | 1.000 | 0.778 | 0.000 | 0.929 | 1.000 | 0.333 | 14 | 27 | $0.0000 | 389.4 |
-| valid (pre-contract) | `valid-1` | `multi_agent_validated` | 0.941 | 0.889 | 0.059 | 0.938 | 1.000 | 0.667 | 16 | 30 | $0.0179 | 1134.5 |
-| valid (pre-contract) | `valid-2` | `multi_agent_validated` | 1.000 | 0.889 | 0.000 | 0.938 | 0.938 | 0.667 | 16 | 29 | $0.0193 | 586.1 |
-| valid (pre-contract) | `valid-3` | `multi_agent_validated` | 0.938 | 0.833 | 0.062 | 0.933 | 0.867 | 0.500 | 15 | 29 | $0.0231 | 958.2 |
-| val2 (strict contract) | `val2-1` | `multi_agent_validated` | 1.000 | 0.944 | 0.000 | 0.941 | 0.941 | 0.833 | 17 | 32 | $0.0254 | 794.3 |
-| val2 (strict contract) | `val2-2` | `multi_agent_validated` | 0.944 | 0.944 | 0.056 | 0.941 | 0.941 | 0.833 | 17 | 33 | $0.0231 | 2502.4 |
-| val2 (strict contract) | `val2-3` | `multi_agent_validated` | 1.000 | 0.944 | 0.000 | 0.941 | 1.000 | 0.833 | 17 | 32 | $0.1466 | 5338.3 |
-| val2 (strict contract) | `val2-1` | `multi_agent_validated` | 1.000 | 1.000 | 0.000 | 0.944 | 0.889 | 1.000 | 18 | 33 | $0.0299 | 1474.1 |
-| val2 (strict contract) | `val2-2` | `multi_agent_validated` | 0.889 | 0.889 | 0.111 | 0.938 | 0.938 | 0.667 | 16 | 33 | $0.0241 | 2118.3 |
-| val2 (strict contract) | `val2-3` | `multi_agent_validated` | 0.842 | 0.889 | 0.158 | 0.938 | 0.938 | 0.667 | 16 | 34 | $0.0376 | 2196.8 |
+| group | label | configuration | precision | recall | false-positive rate | evidence accuracy | severity accuracy | cross-file recall | authorization (of 4) | matched | findings | cost | runtime (s) |
+| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| repeat-* (labels as stored) | `repeat-1` | `scanners_only` | 1.000 | 0.667 | 0.000 | 1.000 | 1.000 | 0.000 | 0 | 12 | 25 | $0.0000 | 92.7 |
+| repeat-* (labels as stored) | `repeat-1` | `single_agent_no_tools` | 0.857 | 0.667 | 0.143 | 1.000 | 1.000 | 0.000 | 0 | 12 | 33 | $0.0028 | 345.1 |
+| repeat-* (labels as stored) | `repeat-1` | `single_agent_tools` | 0.706 | 0.667 | 0.294 | 1.000 | 1.000 | 0.000 | 0 | 12 | 30 | $0.0086 | 337.7 |
+| repeat-* (labels as stored) | `repeat-1` | `multi_agent` | 0.842 | 0.889 | 0.158 | 0.938 | 0.938 | 0.667 | 2 | 16 | 32 | $0.0214 | 986.8 |
+| repeat-* (labels as stored) | `repeat-1` | `scanners_plus_deterministic` | 1.000 | 0.778 | 0.000 | 0.929 | 1.000 | 0.333 | 0 | 14 | 27 | $0.0000 | 88.0 |
+| repeat-* (labels as stored) | `repeat-2` | `scanners_only` | 1.000 | 0.667 | 0.000 | 1.000 | 1.000 | 0.000 | 0 | 12 | 25 | $0.0000 | 91.2 |
+| repeat-* (labels as stored) | `repeat-2` | `single_agent_no_tools` | 0.923 | 0.667 | 0.077 | 1.000 | 1.000 | 0.000 | 0 | 12 | 32 | $0.0030 | 247.0 |
+| repeat-* (labels as stored) | `repeat-2` | `single_agent_tools` | 0.750 | 0.667 | 0.250 | 1.000 | 1.000 | 0.000 | 0 | 12 | 29 | $0.0105 | 485.7 |
+| repeat-* (labels as stored) | `repeat-2` | `multi_agent` | 0.941 | 0.889 | 0.059 | 0.938 | 0.938 | 0.667 | 2 | 16 | 30 | $0.0183 | 656.7 |
+| repeat-* (labels as stored) | `repeat-2` | `scanners_plus_deterministic` | 1.000 | 0.778 | 0.000 | 0.929 | 1.000 | 0.333 | 0 | 14 | 27 | $0.0000 | 67.7 |
+| repeat-* (labels as stored) | `repeat-3` | `scanners_only` | 1.000 | 0.667 | 0.000 | 1.000 | 1.000 | 0.000 | 0 | 12 | 25 | $0.0000 | 61.8 |
+| repeat-* (labels as stored) | `repeat-3` | `single_agent_no_tools` | 0.875 | 0.778 | 0.125 | 1.000 | 0.929 | 0.333 | 1 | 14 | 35 | $0.0030 | 207.3 |
+| repeat-* (labels as stored) | `repeat-3` | `single_agent_tools` | 0.700 | 0.778 | 0.300 | 1.000 | 1.000 | 0.333 | 2 | 14 | 34 | $0.0107 | 967.0 |
+| repeat-* (labels as stored) | `repeat-3` | `single_agent_tools` | 0.632 | 0.667 | 0.368 | 1.000 | 1.000 | 0.000 | 0 | 12 | 32 | $0.0097 | 394.4 |
+| repeat-* (labels as stored) | `repeat-3` | `multi_agent` | 1.000 | 0.944 | 0.000 | 0.941 | 0.882 | 0.833 | 3 | 17 | 30 | $0.0218 | 521.7 |
+| repeat-* (labels as stored) | `repeat-3` | `multi_agent` | 0.938 | 0.833 | 0.062 | 0.933 | 0.933 | 0.500 | 1 | 15 | 29 | $0.0253 | 939.2 |
+| repeat-* (labels as stored) | `repeat-3` | `scanners_plus_deterministic` | 1.000 | 0.778 | 0.000 | 0.929 | 1.000 | 0.333 | 0 | 14 | 27 | $0.0000 | 69.3 |
+| repeat-* (labels as stored) | `repeat-3` | `scanners_plus_deterministic` | 1.000 | 0.778 | 0.000 | 0.929 | 1.000 | 0.333 | 0 | 14 | 27 | $0.0000 | 60.3 |
+| multi_agent baseline | `stage3-multi_agent-1` | `multi_agent` | 0.895 | 0.944 | 0.105 | 0.941 | 0.941 | 0.833 | 3 | 17 | 35 | $0.0226 | 715.5 |
+| multi_agent baseline | `stage3-multi_agent-2` | `multi_agent` | 1.000 | 0.778 | 0.000 | 0.929 | 1.000 | 0.333 | 0 | 14 | 27 | $0.0008 | 432.6 |
+| multi_agent baseline | `stage3-multi_agent-3` | `multi_agent` | 1.000 | 0.778 | 0.000 | 0.929 | 1.000 | 0.333 | 0 | 14 | 27 | $0.0000 | 389.4 |
+| valid (pre-contract) | `valid-1` | `multi_agent_validated` | 0.941 | 0.889 | 0.059 | 0.938 | 1.000 | 0.667 | 2 | 16 | 30 | $0.0179 | 1134.5 |
+| valid (pre-contract) | `valid-2` | `multi_agent_validated` | 1.000 | 0.889 | 0.000 | 0.938 | 0.938 | 0.667 | 2 | 16 | 29 | $0.0193 | 586.1 |
+| valid (pre-contract) | `valid-3` | `multi_agent_validated` | 0.938 | 0.833 | 0.062 | 0.933 | 0.867 | 0.500 | 1 | 15 | 29 | $0.0231 | 958.2 |
+| val2 (strict contract) | `val2-1` | `multi_agent_validated` | 1.000 | 0.944 | 0.000 | 0.941 | 0.941 | 0.833 | 3 | 17 | 32 | $0.0254 | 794.3 |
+| val2 (strict contract) | `val2-2` | `multi_agent_validated` | 0.944 | 0.944 | 0.056 | 0.941 | 0.941 | 0.833 | 3 | 17 | 33 | $0.0231 | 2502.4 |
+| val2 (strict contract) | `val2-3` | `multi_agent_validated` | 1.000 | 0.944 | 0.000 | 0.941 | 1.000 | 0.833 | 3 | 17 | 32 | $0.1466 | 5338.3 |
+| val2 (strict contract) | `val2-1` | `multi_agent_validated` | 1.000 | 1.000 | 0.000 | 0.944 | 0.889 | 1.000 | 4 | 18 | 33 | $0.0299 | 1474.1 |
+| val2 (strict contract) | `val2-2` | `multi_agent_validated` | 0.889 | 0.889 | 0.111 | 0.938 | 0.938 | 0.667 | 2 | 16 | 33 | $0.0241 | 2118.3 |
+| val2 (strict contract) | `val2-3` | `multi_agent_validated` | 0.842 | 0.889 | 0.158 | 0.938 | 0.938 | 0.667 | 2 | 16 | 34 | $0.0376 | 2196.8 |
+
+## Authorization recall (the four planted access-control gaps)
+
+The four authorization issues are the ones `benchmark/report.py` names (`adv-delete-authz-02`, `adv-export-authz-01`, `js-authz-01`, `py-authz-01`). Three runs can match four each, so a group has twelve cells; the count is matched cells over twelve, read from each row's stored `metrics.totals.matched_ids`.
+
+| group | runs | matched cells | recall |
+| --- | --- | ---: | ---: |
+| repeat-* (multi_agent rows) | `repeat-1`, `repeat-2`, `repeat-3` | 5 / 12 | 0.417 |
+| multi_agent baseline | `stage3-multi_agent-1`, `stage3-multi_agent-2`, `stage3-multi_agent-3` | 3 / 12 | 0.250 |
+| valid (pre-contract) | `valid-1`, `valid-2`, `valid-3` | 5 / 12 | 0.417 |
+| val2 (strict contract) | `val2-1`, `val2-2`, `val2-3` | 8 / 12 | 0.667 |
 
 ## Validation outcome per run
 
