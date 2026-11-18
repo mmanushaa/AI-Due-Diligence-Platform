@@ -306,6 +306,43 @@ class FindingEvent(IdMixin, CreatedAtMixin, Base):
     note: Mapped[str | None] = mapped_column(Text)
 
 
+class ValidationCheck(IdMixin, CreatedAtMixin, Base):
+    """One model check of one finding's claim (step 2.10b).
+
+    Every semantic check stores what the model was shown (the cited file and line
+    range), what it answered (verdict, quote and the full masked reply) and what it
+    cost, so a rejected finding can be audited without re-running the pass. The
+    harness fills ``eval_run_id`` for the checks its run produced; checks made
+    outside the harness keep it NULL.
+    """
+
+    __tablename__ = "validation_checks"
+    __table_args__ = (
+        Index("ix_validation_checks_finding_id", "finding_id"),
+        Index("ix_validation_checks_eval_run_id", "eval_run_id"),
+        Index("ix_validation_checks_audit_id", "audit_id"),
+    )
+
+    finding_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("findings.id", ondelete="CASCADE"), nullable=False
+    )
+    eval_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("eval_runs.id", ondelete="SET NULL")
+    )
+    audit_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("audits.id", ondelete="CASCADE"), nullable=False
+    )
+    # supported | contradicted | cannot_tell; the reply's verdict when it parsed.
+    verdict: Mapped[str] = mapped_column(Text, nullable=False)
+    quote: Mapped[str | None] = mapped_column(Text)
+    raw_reply: Mapped[str | None] = mapped_column(Text)
+    cited_file: Mapped[str | None] = mapped_column(Text)
+    line_start: Mapped[int | None] = mapped_column(Integer)
+    line_end: Mapped[int | None] = mapped_column(Integer)
+    latency_ms: Mapped[int | None] = mapped_column(Integer)
+    cost_usd: Mapped[Decimal | None] = mapped_column(Numeric(10, 4))
+
+
 class RiskAssessment(IdMixin, CreatedAtMixin, Base):
     __tablename__ = "risk_assessments"
 

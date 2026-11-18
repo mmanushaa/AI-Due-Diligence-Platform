@@ -33,7 +33,7 @@ from benchmark.harness import bootstrap
 
 bootstrap.add_backend_to_path()
 
-from sqlalchemy import delete, func, select  # noqa: E402
+from sqlalchemy import delete, func, select, update  # noqa: E402
 from sqlalchemy.orm import Session, selectinload, sessionmaker  # noqa: E402
 
 from app.db.enums import AuditStatus, SourceType, VerificationStatus  # noqa: E402
@@ -46,6 +46,7 @@ from app.db.models import (  # noqa: E402
     Finding,
     Repository,
     ScannerRun,
+    ValidationCheck,
 )
 from app.db.session import get_session_factory  # noqa: E402
 from app.jobs.audit import run_audit  # noqa: E402
@@ -480,6 +481,20 @@ def _persist_run(
     )
     session.add(eval_run)
     session.flush()
+
+    # The validator runs before the run row exists, so link its checks now. Only
+    # NULL links are filled, and audit ids belong to one run, so a check can never
+    # be re-pointed at a later run.
+    audit_ids = [item.audit_id for item in evaluations if item.audit_id is not None]
+    if audit_ids:
+        session.execute(
+            update(ValidationCheck)
+            .where(
+                ValidationCheck.audit_id.in_(audit_ids),
+                ValidationCheck.eval_run_id.is_(None),
+            )
+            .values(eval_run_id=eval_run.id)
+        )
 
     for evaluation in evaluations:
         # Cost and latency belong to the repository; they are repeated per row.

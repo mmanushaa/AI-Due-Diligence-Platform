@@ -363,8 +363,8 @@ class AffirmingClient(SilentClient):
         return SimpleNamespace(
             text=json.dumps(
                 {
-                    "claim_true": True,
-                    "reason": "the handler exports any report id without resolving the caller",
+                    "verdict": "supported",
+                    "quote": "    row = store.export_report(conn, report_id)",
                 }
             ),
             cost_usd=Decimal("0.0001"),
